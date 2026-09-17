@@ -1,1 +1,1 @@
-# msc-thesis
+# Copenhagen Menu Finder
