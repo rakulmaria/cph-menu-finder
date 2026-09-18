@@ -1,0 +1,3 @@
+[submodule "cph-menu-finder.wiki"]
+	path = cph-menu-finder.wiki
+	url = git@github.com:rakulmaria/cph-menu-finder.wiki.git
