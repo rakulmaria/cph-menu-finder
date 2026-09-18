@@ -194,3 +194,5 @@ pyrightconfig.json
 
 .DS_Store
 data/*
+
+docs/*
