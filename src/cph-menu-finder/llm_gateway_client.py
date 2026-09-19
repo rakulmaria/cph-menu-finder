@@ -8,7 +8,7 @@ from config import *
 import os
 import openai
 
-RESTAURANT_FILE = "copenhagen-10pct-sample.json"
+RESTAURANT_FILE = "copenhagen-10pct-sample-input.json"
 PROMPT = "improved-20260910.md"
 BATCH_SIZE = 20
 # Gemini counts thinking tokens against the same output budget as the
@@ -30,6 +30,31 @@ def get_client():
 def chunked(seq, n):
     for i in range(0, len(seq), n):
         yield i // n, seq[i:i + n]
+
+
+def build_system_msg(model, system_prompt):
+    """Cache the instructions on Anthropic models; cache_control is a no-op
+    (or an error) elsewhere, so other providers get a plain string."""
+    if not model.startswith("anthropic/"):
+        return {
+            "role": "system", 
+            "content": [
+                {
+                    "type": "text",
+                    "text": system_prompt
+                }
+            ],
+        }
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ],
+    }
 
 
 def call_batch(client, model, system_msg, batch, *, temperature=0, reasoning_effort="medium"):
@@ -86,16 +111,6 @@ def parse_restaurants(path):
 
 def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0, resume=False):
     system_prompt = (PROMPTS_DIR / PROMPT).read_text(encoding="utf-8")
-    system_msg = {
-        "role": "system",
-        "content": [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral", "ttl": "1h"},
-            }
-        ],
-    }
     client = get_client()
 
     responses_dir = RUNS_DATA_DIR / "responses"
@@ -109,10 +124,10 @@ def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0,
     run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     batches = list(chunked(restaurants, batch_size))
-    batches = batches[:1]  # TEMP: testing cache_control, only run batch 0
 
     for model in models:
         model_slug = model.split("/")[-1]
+        system_msg = build_system_msg(model, system_prompt)
 
         if resume:
             # Continue the most recent run for this model, if one exists,
@@ -195,9 +210,9 @@ def main():
     restaurants = parse_restaurants(RAW_DATA_DIR / RESTAURANT_FILE)
 
     models = [
-        # "openai/gpt-5.6-terra",
-        # "openai/gpt-5.6-luna",
-        # "google-ai-studio/gemini-3.7-flash"
+        "openai/gpt-5.6-terra",
+        "openai/gpt-5.6-luna",
+        "google-ai-studio/gemini-3.7-flash",
         "anthropic/claude-sonnet-5",
         # "google-ai-studio/gemini-3.8-flash",
     ]
