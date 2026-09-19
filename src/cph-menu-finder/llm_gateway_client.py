@@ -9,7 +9,7 @@ import os
 import openai
 
 RESTAURANT_FILE = "copenhagen-10pct-sample.json"
-PROMPT = "prompt_20260910.md"
+PROMPT = "improved-20260910.md"
 BATCH_SIZE = 20
 # Gemini counts thinking tokens against the same output budget as the
 # visible answer, so at the default max_tokens it can burn the whole
@@ -86,7 +86,16 @@ def parse_restaurants(path):
 
 def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0, resume=False):
     system_prompt = (PROMPTS_DIR / PROMPT).read_text(encoding="utf-8")
-    system_msg = {"role": "system", "content": system_prompt}
+    system_msg = {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ],
+    }
     client = get_client()
 
     responses_dir = RUNS_DATA_DIR / "responses"
@@ -100,6 +109,7 @@ def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0,
     run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     batches = list(chunked(restaurants, batch_size))
+    batches = batches[:1]  # TEMP: testing cache_control, only run batch 0
 
     for model in models:
         model_slug = model.split("/")[-1]
