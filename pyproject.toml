@@ -12,5 +12,6 @@ dependencies = [
     "pre-commit>=4.6.2",
     "python-dotenv>=1.2.3",
     "seaborn>=0.13.2",
+    "statsmodels>=0.15.0",
     "tqdm>=4.70.1",
 ]
