@@ -13,5 +13,6 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "seaborn>=0.13.2",
     "statsmodels>=0.15.0",
+    "thefuzz>=0.22.1",
     "tqdm>=4.70.1",
 ]
