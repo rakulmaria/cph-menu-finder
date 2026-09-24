@@ -13,10 +13,10 @@ Run from the terminal:
 import sys
 
 import pandas as pd
-
+from data_cleaner import *
 from config import RUNS_DATA_DIR
 
-SOURCE_PATH = RUNS_DATA_DIR / "filtered_types_manual_inspection.csv"
+SOURCE = get_df()
 ANNOTATIONS_PATH = RUNS_DATA_DIR / "menulink_annotations.csv"
 
 MODEL_COLS = ["claude-sonnet-5", "gemini-3.7-flash", "gpt-5.6-luna", "gpt-5.6-terra"]
@@ -32,8 +32,7 @@ CATEGORIES = {
 
 
 def build_queue() -> pd.DataFrame:
-    source = pd.read_csv(SOURCE_PATH, index_col=0)
-    long = source.melt(
+    long = SOURCE.melt(
         id_vars=["id", "name", "websiteUri", "googleMapsUri"],
         value_vars=MODEL_COLS,
         var_name="model",
