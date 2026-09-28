@@ -1,7 +1,16 @@
 import json
 
+import re
 import pandas as pd
 from config import *
+
+def trim_urls(df):
+    url_prefix_pattern = re.compile(r'^(?:https?://)?(?:www\.)?', re.IGNORECASE)
+
+    df['normalized_urls'] = df['menuLink'].str.replace(url_prefix_pattern, '', regex=True)
+    df['normalized_urls'] = df['normalized_urls'].str.rstrip('/')
+
+    return df
 
 def get_df():
     df_llm = get_llm_df()
@@ -24,7 +33,9 @@ def get_llm_df():
         dfs.append(df_llm)
 
     df_llm = pd.concat(dfs, ignore_index=True)
-    model_menulinks = df_llm.pivot_table(index='id', columns='model', values='menuLink', aggfunc='first')
+    df_llm = trim_urls(df_llm)
+    model_menulinks = df_llm.pivot_table(index='id', columns='model', values='normalized_urls', aggfunc='first')
+    
     return model_menulinks
 
 
