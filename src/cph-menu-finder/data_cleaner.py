@@ -132,3 +132,44 @@ def get_sample_df():
     df = df[cols_to_keep]
 
     return df
+
+
+def prepare_df():
+    df = pd.read_json(RAW_DATA_DIR / 'copenhagen-bounds-raw.json')
+
+    # remove out of order restaurants
+    df = df[df["businessStatus"] == "OPERATIONAL"]
+
+    # unpack name
+    df["name"] = df["displayName"].apply(lambda d: d["text"] if isinstance(d, dict) else d)
+
+    # possible "proper" restaurant types that aren't named restaurant or *_restaurant
+    other_types_to_keep = ["bagel_shop", "bistro", "diner", "pizza_delivery"]
+    # not really restaurant
+    discard_restaurants = ["shawarma_restaurant", "hot_dog_restaurant"]
+
+    # only keep "proper" restaurants: "restaurant" or any "*_restaurant"
+    is_restaurant = df["primaryType"].str.fullmatch(r"(.+_)?restaurant", na=False) | df["primaryType"].isin(other_types_to_keep)
+    df = df[is_restaurant & ~df["primaryType"].isin(discard_restaurants)]
+    
+    cols_to_keep = [
+        "id", 
+        "name",
+        "formattedAddress", 
+        # "googleMapsUri",
+        "websiteUri",
+    ]
+    
+    # reindex and filter columns
+    df = df[cols_to_keep]
+    df.reset_index(drop=True, inplace=True)
+
+    # same format as copenhagen-10pct-sample-input.json: list of objects, readable æøå and urls.
+    # round-trip through to_json so missing values become null instead of NaN (invalid json)
+    records = json.loads(df.to_json(orient='records'))
+    
+    with open(RAW_DATA_DIR / 'copenhagen-bounds-input.json', 'w', encoding='utf-8') as f:
+        json.dump(records, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+
+    return df
