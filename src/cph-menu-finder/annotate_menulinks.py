@@ -6,6 +6,9 @@ categorize the link. Progress is saved to disk after every single
 annotation, so you can quit any time (Ctrl+C or 'q') and re-run the
 script later to pick up exactly where you left off.
 
+Author: @Claude Code
+Reviewed: @Rakul M. H. Tórgarð
+
 Run from the terminal:
     python annotate_menulinks.py
 """
