@@ -33,7 +33,7 @@ def prepare_full_data(file):
     - filters away "unproper" restaurant types (hot dog stands etc.)
     - structures in proper input format
 
-    Writes the result to RAW_DATA_DIR / <file stem>-<today>.json
+    Writes the result to RAW_DATA_DIR / <file stem without -raw>-<today>.json
     """
     df = pd.read_json(RAW_DATA_DIR / file)
 
@@ -64,7 +64,7 @@ def prepare_full_data(file):
 
     records = json.loads(df.to_json(orient='records'))
 
-    output = RAW_DATA_DIR / f"{Path(file).stem}-{date.today()}.json"
+    output = RAW_DATA_DIR / f"{Path(file).stem.removesuffix('-raw')}-{date.today()}.json"
     with open(output, 'w', encoding='utf-8') as f:
         json.dump(records, f, indent=2, ensure_ascii=False)
         f.write('\n')
