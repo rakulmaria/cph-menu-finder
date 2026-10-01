@@ -1,3 +1,23 @@
+"""Script used to run restaurant data through LLMs via LLM Gateway.
+
+Sends the restaurants in an input file (prepared by prepare_sample.py) to one
+or more models in batches, together with a system prompt from PROMPTS_DIR, and
+asks each model to find the restaurant's menu using web search.
+
+For every model, writes to RUNS_DATA_DIR:
+    responses/<timestamp>-<model>.csv        one row per restaurant, with the
+                                             input and the model's parsed answer
+    raw_responses/<timestamp>-<model>.jsonl  the full API response per batch,
+                                             used by --resume to skip done batches
+
+@author: Rakul Tórgarð & Claude Code
+@review: Rakul Tórgarð
+
+Usage:
+    python llm_gateway_client.py
+    python llm_gateway_client.py --models anthropic/claude-sonnet-5 --resume
+"""
+
 import argparse
 import json
 import time
@@ -21,6 +41,10 @@ MODELS = [
     # "anthropic/claude-sonnet-5",
     # "google-ai-studio/gemini-3.8-flash",
 ]
+
+class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    """Show argument defaults in --help, and keep the module docstring's layout."""
+
 
 def get_client():
     return openai.OpenAI(
@@ -180,7 +204,9 @@ def run(restaurants, models, *, prompt=PROMPT, batch_size=BATCH_SIZE, sleep=SLEE
 
 
 def main():
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=HelpFormatter
+    )
     parser.add_argument("--input", default=RESTAURANT_FILE,
                         help="restaurant input JSON file, relative to RAW_DATA_DIR")
     parser.add_argument("--prompt", default=PROMPT,

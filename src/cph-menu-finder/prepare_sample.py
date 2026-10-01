@@ -1,6 +1,6 @@
 """Script used to prepare data for LLM input.
 
-@author: Claude Code & Rakul Tórgarð
+@author: Rakul Tórgarð & Claude Code
 @review: Rakul Tórgarð
 
 Subcommands:

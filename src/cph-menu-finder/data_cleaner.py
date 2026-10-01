@@ -1,3 +1,8 @@
+"""
+
+@author: Rakul Tórgarð
+@review: Rakul Tórgarð
+"""
 import json
 
 import re
