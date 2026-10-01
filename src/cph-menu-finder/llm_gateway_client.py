@@ -8,17 +8,19 @@ from config import *
 import os
 import openai
 
-RESTAURANT_FILE = "copenhagen-10pct-sample-input.json"
+# defaults, can be overridden from the command line (see main)
+RESTAURANT_FILE = "copenhagen-bounds-full-2026-10-01.json"
 PROMPT = "improved-20260910.md"
 BATCH_SIZE = 20
-# Gemini counts thinking tokens against the same output budget as the
-# visible answer, so at the default max_tokens it can burn the whole
-# budget reasoning and never emit the JSON. Give it more headroom instead
-# of lowering its reasoning_effort, so it still reasons like the others.
-MAX_TOKENS_OVERRIDES = {
-    "google-ai-studio/gemini-3.8-flash": 32000,
-}
-
+SLEEP = 0.2
+TEMPERATURE = 0
+MODELS = [
+    "openai/gpt-5.6-terra",
+    "openai/gpt-5.6-luna",
+    # "google-ai-studio/gemini-3.7-flash",
+    # "anthropic/claude-sonnet-5",
+    # "google-ai-studio/gemini-3.8-flash",
+]
 
 def get_client():
     return openai.OpenAI(
@@ -32,19 +34,9 @@ def chunked(seq, n):
         yield i // n, seq[i:i + n]
 
 
-def build_system_msg(model, system_prompt):
+def build_system_msg(system_prompt):
     """Cache the instructions on Anthropic models; cache_control is a no-op
     (or an error) elsewhere, so other providers get a plain string."""
-    if not model.startswith("anthropic/"):
-        return {
-            "role": "system", 
-            "content": [
-                {
-                    "type": "text",
-                    "text": system_prompt
-                }
-            ],
-        }
     return {
         "role": "system",
         "content": [
@@ -71,8 +63,6 @@ def call_batch(client, model, system_msg, batch, *, temperature=0, reasoning_eff
         ],
         reasoning_effort=reasoning_effort,
     )
-    if model in MAX_TOKENS_OVERRIDES:
-        kwargs["max_tokens"] = MAX_TOKENS_OVERRIDES[model]
     return client.chat.completions.create(**kwargs)
 
 
@@ -98,19 +88,8 @@ def parse_list(text):
     return data if isinstance(data, list) else None
 
 
-def parse_restaurants(path):
-    df = pd.read_json(path)
-
-    if "displayName" in df.columns:
-        df["name"] = df["displayName"].apply(lambda d: d["text"] if isinstance(d, dict) else d)
-
-    df = df.reindex(columns=["id", "name", "formattedAddress", "websiteUri"])
-    df = df.astype(object).where(df.notna(), None)   # NaN -> None, so missing fields serialize as JSON null
-    return df.to_dict(orient="records")
-
-
-def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0, resume=False):
-    system_prompt = (PROMPTS_DIR / PROMPT).read_text(encoding="utf-8")
+def run(restaurants, models, *, prompt=PROMPT, batch_size=BATCH_SIZE, sleep=SLEEP, temperature=TEMPERATURE, resume=False):
+    system_prompt = (PROMPTS_DIR / prompt).read_text(encoding="utf-8")
     client = get_client()
 
     responses_dir = RUNS_DATA_DIR / "responses"
@@ -127,7 +106,7 @@ def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0,
 
     for model in models:
         model_slug = model.split("/")[-1]
-        system_msg = build_system_msg(model, system_prompt)
+        system_msg = build_system_msg(system_prompt)
 
         if resume:
             # Continue the most recent run for this model, if one exists,
@@ -181,7 +160,7 @@ def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0,
 
             rows = [
                 {
-                    "prompt": PROMPT,               # which prompt produced this
+                    "prompt": prompt,               # which prompt produced this
                     "model": model,
                     "batch_index": batch_index,
                     "restaurant_id": r["id"],
@@ -201,23 +180,28 @@ def run(restaurants, models, *, batch_size=BATCH_SIZE, sleep=0.2, temperature=0,
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--input", default=RESTAURANT_FILE,
+                        help="restaurant input JSON file, relative to RAW_DATA_DIR")
+    parser.add_argument("--prompt", default=PROMPT,
+                        help="system prompt file, relative to PROMPTS_DIR")
+    parser.add_argument("--models", nargs="+", default=MODELS,
+                        help="models to run, space separated")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
+                        help="number of restaurants per request")
+    parser.add_argument("--temperature", type=float, default=TEMPERATURE,
+                        help="sampling temperature")
+    parser.add_argument("--sleep", type=float, default=SLEEP,
+                        help="seconds to wait between requests")
     parser.add_argument("--resume", action="store_true",
                         help="continue each model's most recent run (by filename timestamp) instead of "
                              "starting a new one, skipping batches already present in its raw_responses jsonl")
     args = parser.parse_args()
 
-    restaurants = parse_restaurants(RAW_DATA_DIR / RESTAURANT_FILE)
+    restaurants = json.loads((RAW_DATA_DIR / args.input).read_text(encoding="utf-8"))
 
-    models = [
-        "openai/gpt-5.6-terra",
-        "openai/gpt-5.6-luna",
-        "google-ai-studio/gemini-3.7-flash",
-        "anthropic/claude-sonnet-5",
-        # "google-ai-studio/gemini-3.8-flash",
-    ]
-
-    run(restaurants, models, resume=args.resume)
+    run(restaurants, args.models, prompt=args.prompt, batch_size=args.batch_size,
+        sleep=args.sleep, temperature=args.temperature, resume=args.resume)
 
 
 if __name__ == "__main__":
