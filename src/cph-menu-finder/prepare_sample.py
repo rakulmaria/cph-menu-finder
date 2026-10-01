@@ -122,8 +122,8 @@ def main():
 
     sample_parser = subparsers.add_parser("sample", help="randomly sample a fraction of restaurants")
     sample_parser.add_argument("file", type=Path, help="raw Google Maps places JSON file to sample from")
-    sample_parser.add_argument("--fraction", type=float, default=0.1, help="fraction of restaurants to sample (default: 0.1)")
-    sample_parser.add_argument("--seed", type=int, default=42, help="random seed, for a reproducible sample (default: 42)")
+    sample_parser.add_argument("--fraction", type=float, default=0.1, help="fraction of restaurants to sample (default: %(default)s)")
+    sample_parser.add_argument("--seed", type=int, default=42, help="random seed, for a reproducible sample (default: %(default)s)")
 
     args = parser.parse_args()
 

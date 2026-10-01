@@ -42,10 +42,6 @@ MODELS = [
     # "google-ai-studio/gemini-3.8-flash",
 ]
 
-class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
-    """Show argument defaults in --help, and keep the module docstring's layout."""
-
-
 def get_client():
     return openai.OpenAI(
         api_key=os.getenv("LLMGATEWAY_API_KEY"),
@@ -205,20 +201,20 @@ def run(restaurants, models, *, prompt=PROMPT, batch_size=BATCH_SIZE, sleep=SLEE
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=HelpFormatter
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--input", default=RESTAURANT_FILE,
-                        help="restaurant input JSON file, relative to RAW_DATA_DIR")
+                        help="restaurant input JSON file, relative to RAW_DATA_DIR (default: %(default)s)")
     parser.add_argument("--prompt", default=PROMPT,
-                        help="system prompt file, relative to PROMPTS_DIR")
+                        help="system prompt file, relative to PROMPTS_DIR (default: %(default)s)")
     parser.add_argument("--models", nargs="+", default=MODELS,
-                        help="models to run, space separated")
+                        help="models to run, space separated (default: %(default)s)")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
-                        help="number of restaurants per request")
+                        help="number of restaurants per request (default: %(default)s)")
     parser.add_argument("--temperature", type=float, default=TEMPERATURE,
-                        help="sampling temperature")
+                        help="sampling temperature (default: %(default)s)")
     parser.add_argument("--sleep", type=float, default=SLEEP,
-                        help="seconds to wait between requests")
+                        help="seconds to wait between requests (default: %(default)s)")
     parser.add_argument("--resume", action="store_true",
                         help="continue each model's most recent run (by filename timestamp) instead of "
                              "starting a new one, skipping batches already present in its raw_responses jsonl")
