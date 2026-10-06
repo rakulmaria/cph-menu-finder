@@ -36,7 +36,7 @@ SLEEP = 0.2
 TEMPERATURE = 0
 MODELS = [
     "openai/gpt-5.6-terra",
-    # "openai/gpt-5.6-luna",
+    "openai/gpt-5.6-luna",
     # "google-ai-studio/gemini-3.7-flash",
     # "anthropic/claude-sonnet-5",
     # "google-ai-studio/gemini-3.8-flash",
@@ -100,8 +100,8 @@ def run(restaurants, models, *, prompt=PROMPT, batch_size=BATCH_SIZE, sleep=SLEE
     system_msg = {"role": "system", "content": system_prompt}
     client = get_client()
 
-    responses_dir = RUNS_DATA_DIR / "responses"
-    raw_responses_dir = RUNS_DATA_DIR / "raw_responses"
+    responses_dir = API_DATA_DIR / "responses"
+    raw_responses_dir = API_DATA_DIR / "raw_responses"
 
     responses_dir.mkdir(parents=True, exist_ok=True)
     raw_responses_dir.mkdir(parents=True, exist_ok=True)
