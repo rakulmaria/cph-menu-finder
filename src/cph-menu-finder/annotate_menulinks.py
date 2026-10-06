@@ -119,6 +119,7 @@ def prompt_label(is_empty: bool) -> str:
         prompt = (
             "  Case 2 (empty response): could a menu have been found? Search for max. 3 minutes:\n"
             "    1. direct menu link on Google Maps  2. website from Google Maps  3. first 3 Google results\n"
+            "    (third-party menus count; behind a login = not found; photos of a printed menu or board = not a menu)\n"
             "  [1] Correct (no menu found)   [2] Incorrect (menu exists)\n"
             "  [s] skip for now              [q] save and quit\n"
             "  > "
@@ -127,8 +128,11 @@ def prompt_label(is_empty: bool) -> str:
         labels = URL_LABELS
         prompt = (
             "  Case 1 (URL): is the menu of the correct restaurant visible at the URL?\n"
-            "  [1] Correct (official website)   [2] Correct (third party)   [3] Incorrect\n"
-            "  [s] skip for now                 [q] save and quit\n"
+            "    (no clicking links; behind a login = not visible; photos of a printed menu or board = not a menu)\n"
+            "  [1] Correct (official website, confident)\n"
+            "  [2] Correct (third party, or unsure whether it is the official website)\n"
+            "  [3] Incorrect\n"
+            "  [s] skip for now   [q] save and quit\n"
             "  > "
         )
     while True:
