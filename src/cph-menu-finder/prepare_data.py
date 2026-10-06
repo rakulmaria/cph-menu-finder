@@ -10,9 +10,9 @@ Subcommands:
                 places file and write it in LLM input format
 
 Usage:
-    python prepare_sample.py full_data copenhagen-bounds-raw.json
+    python prepare_data.py full_data copenhagen-bounds-raw.json
 
-    python prepare_sample.py sample \
+    python prepare_data.py sample \
         data/raw_data/copenhagen-bounds-raw.json \
         --fraction 0.1 --seed 42
 """
@@ -24,7 +24,7 @@ from datetime import date
 from pathlib import Path
 import pandas as pd
 from config import *
-
+from data_cleaner import *
 
 def prepare_full_data(file):
     """
@@ -36,20 +36,10 @@ def prepare_full_data(file):
     Writes the result to RAW_DATA_DIR / <file stem without -raw>-<today>.json
     """
     df = pd.read_json(RAW_DATA_DIR / file)
+    df = filter_dataframe(df)
 
     # unpack name
     df["name"] = df["displayName"].apply(lambda d: d["text"] if isinstance(d, dict) else d)
-
-    # remove out of order restaurants
-    df = df[df["businessStatus"] == "OPERATIONAL"]
-
-    # possible "proper" restaurant types that aren't named restaurant or *_restaurant
-    other_types_to_keep = ["bagel_shop", "bistro", "diner", "pizza_delivery"]
-    # not considered "proper" restaurant
-    discard_restaurants = ["shawarma_restaurant", "hot_dog_restaurant"]
-
-    is_restaurant = df["primaryType"].str.fullmatch(r"(.+_)?restaurant", na=False) | df["primaryType"].isin(other_types_to_keep)
-    df = df[is_restaurant & ~df["primaryType"].isin(discard_restaurants)]
 
     cols_to_keep = [
         "id",
