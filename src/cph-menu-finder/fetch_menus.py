@@ -26,7 +26,8 @@ The fetch log is appended to after every URL, so the script can be stopped any
 time and re-run to continue where it left off. Failed URLs are not retried
 unless --retry-failed is given.
 
-Author: @Claude Code
+@author: Rakul Tórgarð & Claude Code
+@review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
     python fetch_menus.py                     # both stages

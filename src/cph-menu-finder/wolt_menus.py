@@ -16,7 +16,8 @@ Output (in data/wolt/<area>/):
     assortments/     <slug>.json, the raw menu per venue
     items.csv        one row per menu item: venue, category, item, description, price in DKK
 
-Author: @Claude Code
+@author: Rakul Tórgarð & Claude Code
+@review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
     python wolt_menus.py                  # Vesterbro (default)
