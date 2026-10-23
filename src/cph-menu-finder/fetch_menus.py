@@ -341,7 +341,6 @@ async def run_browser_stage(urls: list[str], headed: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--stage", choices=["http", "browser", "all"], default="all")
     parser.add_argument("--limit", type=int, help="only fetch the first N unique URLs (for test runs)")
     parser.add_argument("--retry-failed", action="store_true", help="fetch URLs again whose last attempt did not succeed")
     parser.add_argument("--headed", action="store_true", help="show the browser window in the browser stage")
