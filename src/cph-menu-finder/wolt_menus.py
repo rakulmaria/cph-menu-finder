@@ -20,9 +20,9 @@ Output (in data/wolt/<area>/):
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
-    python wolt_menus.py                  # Vesterbro (default)
-    python wolt_menus.py --area vesterbro
+    python wolt_menus.py                  
     python wolt_menus.py --area copenhagen
+    python wolt_menus.py --area vesterbro
 """
 
 import argparse
@@ -38,8 +38,8 @@ from tqdm import tqdm
 
 # (lat_min, lat_max, lon_min, lon_max). Rough boxes, so they overlap neighbouring areas.
 AREAS = {
-    "vesterbro": (55.6600, 55.6760, 12.5300, 12.5660),
-    "copenhagen": (55.51, 55.82, 12.23, 12.73),   # same bounds as the google maps quadtree (epsg.io/4693-area)
+    "copenhagen": (55.51, 55.82, 12.23, 12.73),         # same bounds as the google maps quadtree (epsg.io/4693-area)
+    "vesterbro": (55.6600, 55.6760, 12.5300, 12.5660),  # for testing
 }
 
 VENUES_API = "https://consumer-api.wolt.com/v1/pages/restaurants?lat={lat:.5f}&lon={lon:.5f}"
@@ -154,9 +154,9 @@ def flatten(venues: pd.DataFrame, assortment_dir) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--area", choices=AREAS, default="vesterbro")
+    parser.add_argument("--area", choices=AREAS, default="copenhagen")
     args = parser.parse_args()
     box = AREAS[args.area]
     out_dir = WOLT_DATA_DIR / args.area
