@@ -30,9 +30,7 @@ unless --retry-failed is given.
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
-    python fetch_menus.py                     # both stages
-    python fetch_menus.py --stage http        # only the plain HTTP stage
-    python fetch_menus.py --stage browser     # only the browser stage
+    python fetch_menus.py                     # run script
     python fetch_menus.py --limit 50          # test run on the first 50 URLs
     python fetch_menus.py --retry-failed      # try failed URLs again
     python fetch_menus.py --headed            # show the browser window
@@ -48,6 +46,7 @@ import json
 import mimetypes
 import re
 import time
+from playwright.async_api import async_playwright
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -62,6 +61,7 @@ RESPONSE_FILES = {
     "gpt-5.6-terra": API_DATA_DIR / "responses" / "20261001-133048-gpt-5.6-terra.csv",
     "gpt-5.6-luna": API_DATA_DIR / "responses" / "20261002-094032-gpt-5.6-luna.csv",
 }
+
 PAGES_DIR = MENU_PAGES_DIR / "pages"
 MANIFEST_PATH = MENU_PAGES_DIR / "menu_urls.csv"
 LOG_PATH = MENU_PAGES_DIR / "fetch_log.csv"
@@ -70,6 +70,7 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
+
 ROBOTS_AGENT = "cph-menu-finder"  # name checked against robots.txt rules
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Language": "da,en;q=0.8"}
 
@@ -79,12 +80,9 @@ DOMAIN_DELAY = 1.0          # seconds between two requests to the same domain
 HTTP_TIMEOUT = 30           # seconds
 BROWSER_TIMEOUT = 45_000    # ms
 MIN_TEXT_CHARS = 200        # an HTML page with less visible text than this needs JavaScript
-CHALLENGE_MARKERS = ["just a moment", "enable javascript", "checking your browser", "verify you are human"]
+
 BLOCKED_STATUSES = {401, 403, 429, 503}
 MAGIC_BYTES = {b"%PDF": "application/pdf", b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"RIFF": "image/webp"}
-
-WOLT_SLUG = re.compile(r"wolt\.com/.+/(?:restaurant|venue)/([^/?#]+)")
-WOLT_API = "https://consumer-api.wolt.com/consumer-api/consumer-assortment/v1/venues/slug/{slug}/assortment"
 
 LOG_COLUMNS = [
     "url_hash", "url", "domain", "method", "final_url", "status_code", "content_type",
@@ -135,7 +133,7 @@ def visible_text(html: str) -> str:
 
 
 def looks_like_challenge(text: str) -> bool:
-    return len(text) < 1000 and any(marker in text.lower() for marker in CHALLENGE_MARKERS)
+    return len(text) < 1000 and any(marker in text.lower() for marker in ["just a moment", "enable javascript", "checking your browser", "verify you are human"])
 
 
 def extension(content_type: str, content: bytes) -> str:
@@ -174,11 +172,11 @@ class Politeness:
         origin = f"{parsed.scheme}://{parsed.netloc}"
         async with self.robots_locks.setdefault(origin, asyncio.Lock()):
             if origin not in self.robots:
-                self.robots[origin] = await self._read_robots(origin)
+                self.robots[origin] = await self.read_robots(origin)
         parser = self.robots[origin]
         return parser is None or parser.can_fetch(ROBOTS_AGENT, url)
 
-    async def _read_robots(self, origin: str) -> RobotFileParser | None:
+    async def read_robots(self, origin: str) -> RobotFileParser | None:
         """None (= allow everything) when there is no readable robots.txt."""
         try:
             await self.wait_turn(origin)
@@ -192,10 +190,10 @@ class Politeness:
         return parser
 
 
-# ---------- stage 1: plain HTTP ----------
+# ---------- stage 1: plain HTTP + Wolt API ----------
 
 async def fetch_wolt(url: str, slug: str, client: httpx.AsyncClient, polite: Politeness) -> dict:
-    api_url = WOLT_API.format(slug=slug)
+    api_url = f"https://consumer-api.wolt.com/consumer-api/consumer-assortment/v1/venues/slug/{slug}/assortment"
     row = {"method": "wolt_api", "final_url": api_url}
     await polite.wait_turn(api_url)
     response = await client.get(api_url)
@@ -218,7 +216,7 @@ async def fetch_http(url: str, client: httpx.AsyncClient, insecure_client: httpx
     except httpx.ConnectError as e:
         if "CERTIFICATE" not in str(e).upper():
             raise
-        # lots of small restaurant sites have broken TLS certificates; fetch anyway and note it
+        # some restaurant sites have broken TLS certificates; fetch anyway and note it
         response = await insecure_client.get(url)
         row["error"] = "ssl_certificate_not_verified"
     content_type = response.headers.get("content-type", "")
@@ -243,6 +241,7 @@ async def fetch_http(url: str, client: httpx.AsyncClient, insecure_client: httpx
 
 
 async def run_http_stage(urls: list[str]) -> None:
+    wolt_slug = re.compile(r"wolt\.com/.+/(?:restaurant|venue)/([^/?#]+)")
     semaphore = asyncio.Semaphore(HTTP_CONCURRENCY)
     timeout = httpx.Timeout(HTTP_TIMEOUT)
     async with (
@@ -258,7 +257,7 @@ async def run_http_stage(urls: list[str]) -> None:
                 try:
                     if not await polite.allowed(url):
                         row.update(method="http", outcome="robots_disallowed")
-                    elif slug := WOLT_SLUG.search(url):
+                    elif slug := wolt_slug.search(url):
                         row.update(await fetch_wolt(url, slug.group(1), client, polite))
                     else:
                         row.update(await fetch_http(url, client, insecure_client, polite))
@@ -273,7 +272,7 @@ async def run_http_stage(urls: list[str]) -> None:
         progress.close()
 
 
-# ---------- stage 2: browser ----------
+# ---------- stage 2: browser, for JS sites ----------
 
 async def fetch_browser(url: str, context, polite: Politeness) -> dict:
     row = {"method": "browser"}
@@ -312,8 +311,6 @@ async def fetch_browser(url: str, context, polite: Politeness) -> dict:
 
 
 async def run_browser_stage(urls: list[str], headed: bool) -> None:
-    from playwright.async_api import async_playwright
-
     semaphore = asyncio.Semaphore(BROWSER_CONCURRENCY)
     async with (
         httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=HTTP_TIMEOUT) as client,
@@ -356,25 +353,25 @@ def main() -> None:
     urls = list(dict.fromkeys(manifest["url"]))[: args.limit]
     print(f"{len(manifest)} (restaurant, model) links -> {len(urls)} unique URLs")
 
-    if args.stage in ("http", "all"):
-        log = load_log()
-        done = log[log["method"].isin(["http", "wolt_api"])]
-        if args.retry_failed:
-            done = done[done["outcome"].isin(["ok", "needs_js", "blocked", "robots_disallowed"])]
-        todo = [u for u in urls if u not in set(done["url"])]
-        print(f"http stage: {len(todo)} URLs to fetch ({len(urls) - len(todo)} already done)")
-        asyncio.run(run_http_stage(todo))
+    # run http
+    log = load_log()
+    done = log[log["method"].isin(["http", "wolt_api"])]
+    if args.retry_failed:
+        done = done[done["outcome"].isin(["ok", "needs_js", "blocked", "robots_disallowed"])]
+    todo = [u for u in urls if u not in set(done["url"])]
+    print(f"http stage: {len(todo)} URLs to fetch ({len(urls) - len(todo)} already done)")
+    asyncio.run(run_http_stage(todo))
 
-    if args.stage in ("browser", "all"):
-        log = load_log()
-        latest_http = log[log["method"] == "http"].drop_duplicates("url", keep="last")
-        candidates = set(latest_http.loc[latest_http["outcome"].isin(["needs_js", "blocked"]), "url"])
-        browser_rows = log[log["method"] == "browser"]
-        if args.retry_failed:
-            browser_rows = browser_rows[browser_rows["outcome"] == "ok"]
-        todo = [u for u in urls if u in candidates and u not in set(browser_rows["url"])]
-        print(f"browser stage: {len(todo)} URLs to render")
-        asyncio.run(run_browser_stage(todo, args.headed))
+    # run browser
+    log = load_log()
+    latest_http = log[log["method"] == "http"].drop_duplicates("url", keep="last")
+    candidates = set(latest_http.loc[latest_http["outcome"].isin(["needs_js", "blocked"]), "url"])
+    browser_rows = log[log["method"] == "browser"]
+    if args.retry_failed:
+        browser_rows = browser_rows[browser_rows["outcome"] == "ok"]
+    todo = [u for u in urls if u in candidates and u not in set(browser_rows["url"])]
+    print(f"browser stage: {len(todo)} URLs to render")
+    asyncio.run(run_browser_stage(todo, args.headed))
 
     log = load_log().drop_duplicates("url", keep="last")
     print("\nlatest outcome per URL:")
