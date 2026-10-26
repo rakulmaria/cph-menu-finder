@@ -91,10 +91,12 @@ LOG_COLUMNS = [
 
 
 def url_hash(url: str) -> str:
+    """Short, stable id for a URL, used as file name and to link the manifest to the fetch log."""
     return hashlib.sha1(url.encode()).hexdigest()[:16]
 
 
 def domain(url: str) -> str:
+    """The host of a URL without 'www.', e.g. 'wolt.com'."""
     return urlparse(url).netloc.lower().removeprefix("www.")
 
 
@@ -106,19 +108,21 @@ def build_manifest() -> pd.DataFrame:
             answer = json.loads(answer)
             url = (answer.get("menuLink") or "").strip()
             if url.startswith(("http://", "https://")):
-                rows.append({"restaurant_id": answer["id"], "model": model, "url": url, "format": answer.get("format", "")})
+                rows.append({"id": answer["id"], "model": model, "url": url, "format": answer.get("format", "")})
     manifest = pd.DataFrame(rows)
     manifest["url_hash"] = manifest["url"].map(url_hash)
     return manifest
 
 
 def load_log() -> pd.DataFrame:
+    """Every fetch attempt so far, or an empty log on the first run."""
     if LOG_PATH.exists():
         return pd.read_csv(LOG_PATH, keep_default_na=False)
     return pd.DataFrame(columns=LOG_COLUMNS)
 
 
 def append_log(row: dict) -> None:
+    """Adds one fetch attempt to the log right away, so a stopped run loses nothing."""
     is_new = not LOG_PATH.exists()
     with LOG_PATH.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=LOG_COLUMNS)
@@ -128,15 +132,18 @@ def append_log(row: dict) -> None:
 
 
 def visible_text(html: str) -> str:
+    """The text a reader would see: tags, scripts and styles removed, whitespace collapsed."""
     html = re.sub(r"<(script|style|noscript|template)\b.*?</\1>", " ", html, flags=re.S | re.I)
     return " ".join(re.sub(r"<[^>]+>", " ", html).split())
 
 
 def looks_like_challenge(text: str) -> bool:
+    """True for a short page that is a bot check (Cloudflare 'just a moment', ...) instead of the real page."""
     return len(text) < 1000 and any(marker in text.lower() for marker in ["just a moment", "enable javascript", "checking your browser", "verify you are human"])
 
 
 def extension(content_type: str, content: bytes) -> str:
+    """File extension to save a response with (.html, .pdf, .jpg, ...), from its content type."""
     mime = content_type.split(";")[0].strip().lower()
     if mime in ("", "application/octet-stream", "binary/octet-stream"):
         # some file hosts don't say what they serve; go by the first bytes instead
@@ -145,6 +152,7 @@ def extension(content_type: str, content: bytes) -> str:
 
 
 def now() -> str:
+    """Current UTC time as an ISO timestamp, for the fetched_at column."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
@@ -168,6 +176,7 @@ class Politeness:
             self.last_request[d] = time.monotonic()
 
     async def allowed(self, url: str) -> bool:
+        """Whether the site's robots.txt lets us fetch this URL (read once per site)."""
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
         async with self.robots_locks.setdefault(origin, asyncio.Lock()):
@@ -193,6 +202,7 @@ class Politeness:
 # ---------- stage 1: plain HTTP + Wolt API ----------
 
 async def fetch_wolt(url: str, slug: str, client: httpx.AsyncClient, polite: Politeness) -> dict:
+    """Saves a Wolt venue's menu as JSON from Wolt's assortment API, instead of the JS-built page."""
     api_url = f"https://consumer-api.wolt.com/consumer-api/consumer-assortment/v1/venues/slug/{slug}/assortment"
     row = {"method": "wolt_api", "final_url": api_url}
     await polite.wait_turn(api_url)
@@ -209,6 +219,7 @@ async def fetch_wolt(url: str, slug: str, client: httpx.AsyncClient, polite: Pol
 
 
 async def fetch_http(url: str, client: httpx.AsyncClient, insecure_client: httpx.AsyncClient, polite: Politeness) -> dict:
+    """Saves the URL's response as is, and marks HTML pages with too little text as needs_js."""
     row = {"method": "http"}
     await polite.wait_turn(url)
     try:
@@ -241,6 +252,7 @@ async def fetch_http(url: str, client: httpx.AsyncClient, insecure_client: httpx
 
 
 async def run_http_stage(urls: list[str]) -> None:
+    """Stage 1: fetches all URLs in parallel (Wolt via the API, the rest via plain HTTP) and logs each one."""
     wolt_slug = re.compile(r"wolt\.com/.+/(?:restaurant|venue)/([^/?#]+)")
     semaphore = asyncio.Semaphore(HTTP_CONCURRENCY)
     timeout = httpx.Timeout(HTTP_TIMEOUT)
@@ -275,6 +287,7 @@ async def run_http_stage(urls: list[str]) -> None:
 # ---------- stage 2: browser, for JS sites ----------
 
 async def fetch_browser(url: str, context, polite: Politeness) -> dict:
+    """Opens the URL in a browser tab, lets the JavaScript run and saves the rendered HTML."""
     row = {"method": "browser"}
     page = await context.new_page()
     try:
@@ -311,6 +324,7 @@ async def fetch_browser(url: str, context, polite: Politeness) -> dict:
 
 
 async def run_browser_stage(urls: list[str], headed: bool) -> None:
+    """Stage 2: renders the needs_js/blocked URLs in a few parallel Chromium tabs and logs each one."""
     semaphore = asyncio.Semaphore(BROWSER_CONCURRENCY)
     async with (
         httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=HTTP_TIMEOUT) as client,
@@ -340,6 +354,7 @@ async def run_browser_stage(urls: list[str], headed: bool) -> None:
 # ---------- main ----------
 
 def main() -> None:
+    """Builds the URL list, runs the http stage, then the browser stage, skipping URLs already in the log."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, help="only fetch the first N unique URLs (for test runs)")
     parser.add_argument("--retry-failed", action="store_true", help="fetch URLs again whose last attempt did not succeed")
