@@ -170,7 +170,7 @@ def run(restaurants, models, *, prompt=PROMPT, batch_size=BATCH_SIZE, sleep=SLEE
                     "prompt": prompt,               # which prompt produced this
                     "model": model,
                     "batch_index": batch_index,
-                    "restaurant_id": r["id"],
+                    "id": r["id"],
                     "input": json.dumps(r, ensure_ascii=False),
                     "answer": by_id.get(r["id"], "" if parsed is not None else answer),
                 }
