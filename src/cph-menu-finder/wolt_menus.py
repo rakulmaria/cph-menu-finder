@@ -110,6 +110,7 @@ def fetch_venues(client: httpx.Client, box: tuple, points_dir) -> pd.DataFrame:
 
 
 def fetch_assortments(client: httpx.Client, slugs: list[str], out_dir) -> None:
+    """Downloads each venue's menu as <slug>.json, skipping menus that are already cached."""
     out_dir.mkdir(parents=True, exist_ok=True)
     todo = [s for s in slugs if not (out_dir / f"{s}.json").exists()]
     print(f"menus: {len(todo)} to download ({len(slugs) - len(todo)} cached)")
@@ -134,6 +135,7 @@ def category_of_items(categories: list[dict], parent: str = "") -> dict[str, str
 
 
 def flatten(venues: pd.DataFrame, assortment_dir) -> pd.DataFrame:
+    """One row per menu item from all downloaded menus: venue, category, item, description, price in DKK."""
     rows = []
     for v in venues.itertuples():
         path = assortment_dir / f"{v.slug}.json"
@@ -144,7 +146,7 @@ def flatten(venues: pd.DataFrame, assortment_dir) -> pd.DataFrame:
         for item in assortment.get("items", []):
             price = item.get("price")
             rows.append({
-                "slug": v.slug,
+                "wolt_id": v.wolt_id,
                 "venue": v.name,
                 "category": categories.get(item["id"], ""),
                 "item": item.get("name", ""),
@@ -155,6 +157,7 @@ def flatten(venues: pd.DataFrame, assortment_dir) -> pd.DataFrame:
 
 
 def main():
+    """Finds the venues in the chosen area, downloads their menus and writes venues.csv and items.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--area", choices=AREAS, default="copenhagen")
     args = parser.parse_args()
@@ -170,7 +173,7 @@ def main():
 
     items = flatten(venues, out_dir / "assortments")
     items.to_csv(out_dir / "items.csv", index=False)
-    print(f"{len(items)} menu items from {items['slug'].nunique()} venues -> {out_dir / 'items.csv'}")
+    print(f"{len(items)} menu items from {items['wolt_id'].nunique()} venues -> {out_dir / 'items.csv'}")
 
 
 if __name__ == "__main__":
