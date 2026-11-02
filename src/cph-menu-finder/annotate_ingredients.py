@@ -1,31 +1,33 @@
-"""Manual annotation tool for raw_to_ingredient.csv: decide, one raw word at a time, which
-ingredient it stands for.
+"""Manual annotation tool for ingredients.csv: go through the raw ingredients one at a time and
+fill in `ingredient_verified` and `is_ingredient`.
 
-Goes through every raw word that is not reviewed yet, most frequent first (the top 300 words
-cover about 70% of all occurrences, so coverage goes up fast at the start). For each word it
-shows how many food items it appears in and a few example descriptions, and asks you to:
-    keep      the word is an ingredient as it is            (tomat -> tomat)
-    map       the word stands for another ingredient        (kyling -> kylling, prawns -> reje)
-    drop      the word is not an ingredient                 (fyld, valgfri, stk, x, co2e)
+Goes through every raw ingredient that is not reviewed yet (empty `is_ingredient`), most
+frequent first (the most frequent few hundred words cover most occurrences, so coverage goes
+up fast at the start). For each word it shows how many food items it appears in and a few of
+their descriptions (from item_ingredients.csv), and asks you to:
+    keep      [enter]   the word is an ingredient as it is      tomat  -> tomat,   is_ingredient 1
+    correct   type it   the word is an ingredient, spelled /    tomate -> tomat,   is_ingredient 1
+                        named differently                       prawns -> reje
+    drop      [d]       the word is not an ingredient           kilo   -> kilo,    is_ingredient 0
+                                                                (co2e, stk, sauce, valgfri)
 
-Every decision sets `ingredient` and marks the row `reviewed` = "x". Coverage, the share of
-all word occurrences (sum of n) that is reviewed, is shown as you go: stop when it is high
-enough (e.g. 85-90%) or when a batch of words barely moves it. Unreviewed words are not
-lost, they keep their raw form as `ingredient`.
+Coverage, the share of all (item, raw ingredient) rows whose raw ingredient is reviewed, is
+shown as you go: stop when it is high enough (e.g. 85-90%) or when a batch of words barely
+moves it.
 
 Progress is saved to disk after every single annotation, so you can quit any time (Ctrl+C or
 'q') and re-run the script later to pick up exactly where you left off. 'u' undoes the last
 annotation of this session.
 
-raw_to_ingredient.csv is made by raw_to_ingredient.py, which never overwrites what is
-annotated here, so the two can be run in any order.
+ingredients.csv and item_ingredients.csv are made by raw_to_ingredient.py, which never
+overwrites what is annotated here, so the two can be run in any order.
 
 Author: @Claude Code
 Reviewed: @Rakul M. H. Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
     python annotate_ingredients.py
-    python annotate_ingredients.py --area vesterbro
+    python annotate_ingredients.py --area copenhagen
 """
 
 import argparse
@@ -33,102 +35,98 @@ import re
 import sys
 
 import pandas as pd
-from config import WOLT_DATA_DIR
-from raw_to_ingredient import COLUMNS, load_food_items
+from raw_to_ingredient import ANNOTATED, INGREDIENT_COLUMNS, paths, read_ingredients
 
 N_EXAMPLES = 3      # example descriptions shown per word
 EXAMPLE_WIDTH = 110
 
 
-def load_table(path) -> pd.DataFrame:
-    # keep_default_na=False so dropped words (empty `ingredient`) are read as "" instead of NaN
-    table = pd.read_csv(path, keep_default_na=False)
-    if "reviewed" not in table:   # csv from before the column existed
-        table["reviewed"] = ""
-    return table[COLUMNS]
+def save_ingredients(ingredients: pd.DataFrame, path) -> None:
+    ingredients.to_csv(path, index=False)
 
 
-def save_table(table: pd.DataFrame, path) -> None:
-    table.to_csv(path, index=False)
+def is_reviewed(ingredients: pd.DataFrame) -> pd.Series:
+    return ingredients.is_ingredient != ""
 
 
-def coverage(table: pd.DataFrame) -> float:
-    """Share of all word occurrences (sum of n) whose word is reviewed."""
-    total = table.n.sum()
-    return table.n[table.reviewed == "x"].sum() / total if total else 0.0
+def coverage(ingredients: pd.DataFrame, n: pd.Series) -> float:
+    """Share of all (item, raw ingredient) rows whose raw ingredient is reviewed."""
+    reviewed = ingredients.ingredient_raw[is_reviewed(ingredients)]
+    total = n.sum()
+    return n[reviewed].sum() / total if total else 0.0
 
 
-def examples(word: str, stored: str, descriptions: pd.Series) -> list[str]:
-    """The stored example first, then other descriptions containing the word. Up to 2 extra letters are allowed,
-    since the lemma is often the word minus its ending (agurk -> agurker), but not more (ris should not match ristede)."""
-    found = descriptions[descriptions.str.contains(r"\b" + re.escape(word) + r"\w{0,2}\b", flags=re.UNICODE)]
-    shown = [stored] + [d for d in found.head(N_EXAMPLES * 3) if d != stored]
-    return [re.sub(r"\s+", " ", d)[:EXAMPLE_WIDTH] for d in shown[:N_EXAMPLES] if d]
+def examples(descriptions: list[str]) -> list[str]:
+    """A few distinct descriptions on one line each."""
+    shown = list(dict.fromkeys(re.sub(r"\s+", " ", d).strip() for d in descriptions))
+    return [d[:EXAMPLE_WIDTH] for d in shown[:N_EXAMPLES]]
 
 
-def prompt_decision(word: str) -> str:
-    """Returns the ingredient ("" = drop), or one of the commands s, u, q."""
+def prompt_decision(word: str) -> tuple[str, str] | str:
+    """Returns (ingredient_verified, is_ingredient), or one of the commands s, u, q."""
     prompt = (
-        f"  [enter] keep as '{word}'   [d] drop (not an ingredient)   or type the ingredient it stands for\n"
+        f"  [enter] keep as '{word}'   [d] drop (not an ingredient)   or type the correct spelling / ingredient\n"
         "  [s] skip for now   [u] undo last   [q] save and quit\n"
         "  > "
     )
     while True:
         choice = input(prompt).strip().lower()
         if choice == "":
-            return word
+            return word, "1"
         if choice == "d":
-            return ""
+            return word, "0"
         if choice in ("s", "u", "q"):
             return choice
         if len(choice) == 1:
             print("  Invalid input, try again.\n")
             continue
-        return choice
+        return choice, "1"
 
 
 def confirm_new_ingredient(ingredient: str, known: set[str]) -> bool:
-    """Catches typos: asks before mapping to an ingredient no other word maps to yet."""
+    """Catches typos: asks before correcting to an ingredient no other word maps to yet."""
     if ingredient in known:
         return True
     return input(f"  '{ingredient}' is a new ingredient (no other word maps to it yet). Use it? [y/n] > ").strip().lower() == "y"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Annotate raw_to_ingredient.csv: which ingredient does each raw word stand for?")
+    parser = argparse.ArgumentParser(description="Annotate ingredients.csv: is each raw word an ingredient, and which one?")
     parser.add_argument("--area", default="vesterbro")
     args = parser.parse_args()
-    path = WOLT_DATA_DIR / args.area / "raw_to_ingredient.csv"
-    if not path.exists():
+    item_ingredients_path, path = paths(args.area)
+    if not path.exists() or not item_ingredients_path.exists():
         sys.exit(f"{path} not found, run raw_to_ingredient.py --area {args.area} first")
 
-    table = load_table(path)
-    descriptions = pd.Series(load_food_items(args.area).description.unique())
-    remaining = table[(table.reviewed != "x") & (table.n > 0)].sort_values("n", ascending=False).index
+    ingredients = read_ingredients(path)[INGREDIENT_COLUMNS]
+    item_ingredients = pd.read_csv(item_ingredients_path, keep_default_na=False)
+    n = ingredients.set_index("ingredient_raw").n                          # food items per raw ingredient
+    descriptions = item_ingredients.groupby("ingredient_raw").description_raw.apply(list)
 
-    n_done = (table.reviewed == "x").sum()
-    print(f"Area: {args.area}. {n_done}/{len(table)} words reviewed, coverage {coverage(table):.1%}. "
+    remaining = ingredients[~is_reviewed(ingredients) & (ingredients.n > 0)] \
+        .sort_values("n", ascending=False).index
+
+    n_done = is_reviewed(ingredients).sum()
+    print(f"Area: {args.area}. {n_done}/{len(ingredients)} words reviewed, coverage {coverage(ingredients, n):.1%}. "
           f"{len(remaining)} remaining.\n")
 
-    history = []   # (row index, previous ingredient, previous reviewed), for undo
+    history = []   # (row index, previous [ingredient_verified, is_ingredient]), for undo
     i = 0
     while i < len(remaining):
         idx = remaining[i]
-        row = table.loc[idx]
+        word = ingredients.loc[idx, "ingredient_raw"]
 
         print("\n" + "=" * 70)
-        print(f"[{n_done + 1}/{len(table)}]  coverage {coverage(table):.1%}")
-        print(f"WORD: {row.ingredient_raw}   (in {row.n} food items)")
-        if row.ingredient != row.ingredient_raw:
-            print(f"  currently mapped to: {row.ingredient or '(dropped)'}")
-        for ex in examples(row.ingredient_raw, row.example, descriptions):
+        print(f"[{n_done + 1}/{len(ingredients)}]  coverage {coverage(ingredients, n):.1%}")
+        print(f"WORD: {word}   (in {n[word]} food items)")
+        for ex in examples(descriptions[word]):
             print(f"    - {ex}")
         print("=" * 70)
 
-        result = prompt_decision(row.ingredient_raw)
+        result = prompt_decision(word)
 
         if result == "q":
-            print(f"\nSaved. {n_done}/{len(table)} reviewed, coverage {coverage(table):.1%}. Stored at {path}")
+            print(f"\nSaved. {n_done}/{len(ingredients)} reviewed, coverage {coverage(ingredients, n):.1%}. Stored at {path}")
             sys.exit(0)
         if result == "s":
             i += 1
@@ -137,29 +135,30 @@ def main() -> None:
             if not history:
                 print("  Nothing to undo in this session.")
                 continue
-            prev_idx, prev_ingredient, prev_reviewed = history.pop()
-            table.loc[prev_idx, ["ingredient", "reviewed"]] = [prev_ingredient, prev_reviewed]
-            save_table(table, path)
+            prev_idx, prev_values = history.pop()
+            ingredients.loc[prev_idx, ANNOTATED] = prev_values
+            save_ingredients(ingredients, path)
             n_done -= 1
             i = list(remaining).index(prev_idx)   # back to the undone word
-            print(f"  Undid '{table.loc[prev_idx, 'ingredient_raw']}'.")
+            print(f"  Undid '{ingredients.loc[prev_idx, 'ingredient_raw']}'.")
             continue
 
-        known = set(table.ingredient[(table.reviewed == "x") & (table.ingredient != "")])
-        if result not in ("", row.ingredient_raw) and not confirm_new_ingredient(result, known):
+        verified, is_ingredient = result
+        known = set(ingredients.ingredient_verified[ingredients.is_ingredient == "1"])
+        if verified != word and not confirm_new_ingredient(verified, known):
             continue   # ask again for the same word
 
-        history.append((idx, row.ingredient, row.reviewed))
-        table.loc[idx, ["ingredient", "reviewed"]] = [result, "x"]
-        save_table(table, path)
+        history.append((idx, list(ingredients.loc[idx, ANNOTATED])))
+        ingredients.loc[idx, ANNOTATED] = [verified, is_ingredient]
+        save_ingredients(ingredients, path)
         n_done += 1
         i += 1
 
-    print(f"\nAll words reviewed! {n_done}/{len(table)}, coverage {coverage(table):.1%}. Saved to {path}")
+    print(f"\nAll words reviewed! {n_done}/{len(ingredients)}, coverage {coverage(ingredients, n):.1%}. Saved to {path}")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\nStopped. Progress up to the last annotation is stored in raw_to_ingredient.csv")
+        print("\n\nStopped. Progress up to the last annotation is stored in ingredients.csv")
