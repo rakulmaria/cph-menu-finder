@@ -146,6 +146,7 @@ def flatten(venues: pd.DataFrame, assortment_dir) -> pd.DataFrame:
         for item in assortment.get("items", []):
             price = item.get("price")
             rows.append({
+                "item_id": item["id"],
                 "wolt_id": v.wolt_id,
                 "venue": v.name,
                 "category": categories.get(item["id"], ""),
