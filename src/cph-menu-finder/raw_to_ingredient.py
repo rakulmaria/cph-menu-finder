@@ -1,30 +1,44 @@
-"""Build the raw_to_ingredient.csv lookup table from the Wolt menu descriptions.
+"""Build the ingredient tables from the Wolt menu descriptions.
 
-Steps, for one area:
-    1. items      read items.csv, normalise the text and keep food items only
-                  (drinks, dips and engangsservice are dropped by category)
-    2. lemmas     lemmatise each unique description with spaCy (da_core_news_trf),
-                  keeping nouns, proper nouns and X (the Danish model tags many foreign
-                  food words as X), minus Danish and English stop words
-    3. table      explode to one row per (item, lemma) and count how many food items
-                  each lemma appears in
+Data model, per area (all in data/wolt/<area>/):
 
-The table is meant to be annotated by hand (see annotate_ingredients.py): change `ingredient`
-where a raw word should map to something else (kyling -> kylling, prawns -> reje), or leave it
-empty to drop a non-food word (valgfri, stk), and mark the row `reviewed` = "x". Re-running never
-overwrites those edits: existing rows keep their `ingredient` and `reviewed`, only `n` and
-`example` are refreshed, and new raw words are added unreviewed with `ingredient` = `ingredient_raw`.
-Raw words that no longer occur keep their row with n = 0.
+    venues.csv              wolt_id, name, ...                          one row per venue
+        | 1 -> N            (items.wolt_id)
+    items.csv               item_id, wolt_id, ..., description          one row per menu item
+        | N -> M            (resolved by item_ingredients)
+    item_ingredients.csv    item_id, description_raw, ingredient_raw    one row per (item, raw ingredient)
+        | N -> 1            (ingredient_raw)
+    ingredients.csv         ingredient_raw, n, ingredient_verified,     one row per raw ingredient
+                            is_ingredient
 
-Output (in data/wolt/<area>/):
-    raw_to_ingredient.csv   ingredient_raw, n, ingredient, reviewed, example
+Steps:
+    1. items      read items.csv, keep food items with a description (drinks, dips and
+                  engangsservice are dropped by category), lowercase the description
+    2. lemmas     lemmatise each unique description with spaCy (da_core_news_trf): drop stop,
+                  punctuation and space tokens, keep NOUN, PROPN and X (the Danish model tags
+                  many English/foreign food words as X), minus English stop words, then join
+                  words that are one ingredient when they stand directly next to each other:
+                  the pairs in MULTI_WORD (pommes + frites -> pommes frites) and any word
+                  before a HEAD_WORD (teriyaki + sauce -> teriyaki sauce)
+    3. explode    item_ingredients.csv: one row per item and raw ingredient (each raw ingredient
+                  at most once per item). Rebuilt from scratch on every run.
+    4. lookup     ingredients.csv: every raw ingredient once, with n = the number of food items
+                  it appears in, most frequent first. New ones are added unreviewed (empty
+                  ingredient_verified and is_ingredient); existing annotations are never changed,
+                  so they survive re-runs (only n is recounted). Raw ingredients that no longer
+                  occur keep their row with n = 0.
+
+ingredient_verified and is_ingredient are filled in by hand with annotate_ingredients.py:
+    ingredient_verified   the raw word as it is (tomat -> tomat) or spell-corrected / mapped
+                          (tomate -> tomat, kyling -> kylling)
+    is_ingredient         1 = an ingredient, 0 = not one (kilo, co2e, stk), "" = not reviewed yet
+Many raw ingredients can share one verified ingredient (kyling, kyllingebryst -> kylling).
 
 @author: Rakul Tórgarð & Claude Code
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
     python raw_to_ingredient.py
-    python raw_to_ingredient.py --area vesterbro
     python raw_to_ingredient.py --area copenhagen
 """
 
@@ -34,6 +48,7 @@ import re
 import pandas as pd
 import spacy
 from spacy.lang.en.stop_words import STOP_WORDS as EN_STOP
+from tqdm import tqdm
 from config import WOLT_DATA_DIR
 
 # a category is a drink if one of its words IS one of these ...
@@ -46,10 +61,32 @@ NOT_DRINK_WORDS = {"bowl", "bowls", "hovedret", "hovedretter", "menu", "menuer"}
 # whole category names that are not food ("burger med fries & dip" stays food)
 OTHER = {"dip", "dips", "crust dip", "crust dips", "dyppelse", "engangsservice"}
 
-# words spaCy splits apart that belong together
-MULTI_WORD = {"pommes|frites": "pommes frites"}
+# consecutive lemmas spaCy splits apart that are one ingredient
+MULTI_WORD = {
+    ("pommes", "frites"): "pommes frites",
+    ("creme", "fraiche"): "creme fraiche",
+    ("grana", "padano"): "grana padano",
+}
+# catch-all: "<word> sauce" -> one ingredient, for any kept word directly before it (teriyaki sauce, goma sauce)
+HEAD_WORDS = {"sauce"}
 
-COLUMNS = ["ingredient_raw", "n", "ingredient", "reviewed", "example"]
+ITEM_INGREDIENT_COLUMNS = ["item_id", "description_raw", "ingredient_raw"]
+INGREDIENT_COLUMNS = ["ingredient_raw", "n", "ingredient_verified", "is_ingredient"]
+ANNOTATED = ["ingredient_verified", "is_ingredient"]   # the hand-made columns, never overwritten
+
+
+def read_ingredients(path) -> pd.DataFrame:
+    """ingredients.csv with unreviewed cells as "" (not NaN) and is_ingredient as the text "1"/"0"/""."""
+    table = pd.read_csv(path, keep_default_na=False, dtype={"is_ingredient": str})
+    for col in ANNOTATED:
+        if col not in table:   # csv from before the column existed
+            table[col] = ""
+    return table
+
+
+def paths(area: str) -> tuple:
+    """(item_ingredients.csv, ingredients.csv) of an area."""
+    return WOLT_DATA_DIR / area / "item_ingredients.csv", WOLT_DATA_DIR / area / "ingredients.csv"
 
 
 def normalise(s: str) -> str:
@@ -68,82 +105,95 @@ def is_other(category: str) -> bool:
 
 
 def load_food_items(area: str) -> pd.DataFrame:
+    """Food items with a description. `description_raw` is as on Wolt, `description` is normalised."""
     items = pd.read_csv(WOLT_DATA_DIR / area / "items.csv")
+    items["description_raw"] = items.description.fillna("")
     for col in ["category", "item", "description"]:
         items[col] = items[col].fillna("").map(normalise)
     is_food = ~(items.category.map(is_drink) | items.category.map(is_other))
     return items[is_food & (items.description != "")]
 
 
+def join_multi_word(words: list[tuple[int, str]]) -> list[str]:
+    """Joins words that are one ingredient, given as (token position, lemma). Only words directly
+    next to each other in the text are joined, so "ris og sauce" stays [ris, sauce]:
+        a MULTI_WORD pair       [pommes, frites]   -> [pommes frites]
+        any word + a HEAD_WORD  [teriyaki, sauce]  -> [teriyaki sauce]"""
+    joined, last = [], None   # last = token position of the last word in `joined`
+    for i, w in words:
+        prev = joined[-1] if joined and last == i - 1 else None
+        if prev is not None and (prev, w) in MULTI_WORD:
+            joined[-1] = MULTI_WORD[(prev, w)]
+        elif prev is not None and w in HEAD_WORDS and not prev.endswith(w):   # not "sauce sauce"
+            joined[-1] = f"{prev} {w}"
+        else:
+            joined.append(w)
+        last = i
+    return joined
+
+
 def lemmatise_doc(descriptions: list[str]) -> dict[str, list[str]]:
-    """description -> list of lemmas, joining the words in MULTI_WORD back together."""
+    """description -> its raw ingredients (lemmas), in order."""
+    on_gpu = spacy.prefer_gpu()   # must come before spacy.load; falls back to CPU if there is no GPU
+    print(f"spaCy on {'GPU' if on_gpu else 'CPU'}")
     nlp = spacy.load("da_core_news_trf")
     lemmas = {}
-    for desc, doc in zip(descriptions, nlp.pipe(descriptions, batch_size=64)):
-        words = [t.lemma_.lower() for t in doc
-            if not (t.is_stop or t.is_punct or t.is_space)
-            and t.pos_ in {"NOUN", "PROPN", "X"}
-            and t.lemma_.lower() not in EN_STOP]
-        joined = "|".join(words)
-        for split, whole in MULTI_WORD.items():
-            joined = joined.replace(split, whole)
-        lemmas[desc] = joined.split("|") if joined else []
+    docs = nlp.pipe(descriptions, batch_size=64)
+    for desc, doc in tqdm(zip(descriptions, docs), total=len(descriptions), desc="lemmatising", unit="desc"):
+        words = [(t.i, t.lemma_.lower()) for t in doc
+                 if not (t.is_stop or t.is_punct or t.is_space)
+                 and t.pos_ in {"NOUN", "PROPN", "X"}
+                 and t.lemma_.lower() not in EN_STOP]
+        lemmas[desc] = join_multi_word(words)
     return lemmas
 
 
-def count_raw(items: pd.DataFrame, lemmas: dict[str, list[str]]) -> pd.DataFrame:
-    """One row per raw word: in how many food items it occurs, plus one example description."""
-    exploded = (
-        items[["description"]]
-        .reset_index(names="row")    # one id per food item, so repeated descriptions (chains) count per item
-        .assign(ingredient_raw=lambda d: d.description.map(lemmas))
+def explode(items: pd.DataFrame, lemmas: dict[str, list[str]]) -> pd.DataFrame:
+    """item_ingredients: one row per (item, raw ingredient); items without any raw ingredient drop out."""
+    return (
+        items.assign(ingredient_raw=items.description.map(lemmas))
         .explode("ingredient_raw")
         .dropna(subset=["ingredient_raw"])
-        .drop_duplicates(["row", "ingredient_raw"])   # same word twice in one item counts once
+        .drop_duplicates(["item_id", "ingredient_raw"])   # same word twice in one item counts once
+        [ITEM_INGREDIENT_COLUMNS]
+        .reset_index(drop=True)
     )
-    table = (
-        exploded.groupby("ingredient_raw")
-        .agg(n=("row", "size"), example=("description", "first"))
-        .reset_index()
-    )
-    # one line, max 120 characters, so the csv stays easy to edit by hand
-    table["example"] = table.example.str.replace(r"\s+", " ", regex=True, flags=re.UNICODE).str.slice(0, 120)
-    return table
 
 
-def merge_with_existing(fresh: pd.DataFrame, path) -> pd.DataFrame:
-    """Keeps every hand-edited `ingredient` and `reviewed`; new raw words map to themselves, unreviewed."""
-    if not path.exists():
-        return fresh.assign(ingredient=fresh.ingredient_raw, reviewed="")[COLUMNS]
-    existing = pd.read_csv(path, keep_default_na=False)   # empty `ingredient` stays "", not NaN
-    if "reviewed" not in existing:                         # csv from before the column existed
-        existing["reviewed"] = ""
-    merged = existing[["ingredient_raw", "ingredient", "reviewed"]].merge(fresh, on="ingredient_raw", how="outer")
-    merged["ingredient"] = merged.ingredient.fillna(merged.ingredient_raw)
-    merged["reviewed"] = merged.reviewed.fillna("")
-    merged["n"] = merged.n.fillna(0).astype(int)
-    merged["example"] = merged.example.fillna("")
-    return merged[COLUMNS]
+def update_ingredients(item_ingredients: pd.DataFrame, path) -> pd.DataFrame:
+    """ingredients: existing annotations kept, new raw ingredients added unverified, n recounted,
+    most frequent first."""
+    counts = item_ingredients.ingredient_raw.value_counts().rename("n").reset_index()
+    if path.exists():
+        existing = read_ingredients(path)
+        merged = existing[["ingredient_raw", *ANNOTATED]].merge(counts, on="ingredient_raw", how="outer")
+    else:
+        merged = counts.assign(ingredient_verified="", is_ingredient="")
+    merged[ANNOTATED] = merged[ANNOTATED].fillna("")
+    merged["n"] = merged.n.fillna(0).astype(int)   # raw ingredients that no longer occur keep their row with n = 0
+    return merged.sort_values(["n", "ingredient_raw"], ascending=[False, True])[INGREDIENT_COLUMNS]
 
 
 def main():
-    """Lemmatises the food descriptions of one area and writes/updates raw_to_ingredient.csv."""
+    """Lemmatises the food descriptions of one area and writes item_ingredients.csv and ingredients.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--area", default="vesterbro")
     args = parser.parse_args()
-    path = WOLT_DATA_DIR / args.area / "raw_to_ingredient.csv"
+    item_ingredients_path, ingredients_path = paths(args.area)
 
     items = load_food_items(args.area)
     descriptions = list(items.description.unique())
     print(f"{len(items)} food items with a description, {len(descriptions)} unique descriptions")
 
-    lemmas = lemmatise_doc(descriptions)
-    table = merge_with_existing(count_raw(items, lemmas), path)
-    table = table.sort_values(["n", "ingredient_raw"], ascending=[False, True])
-    table.to_csv(path, index=False)
+    item_ingredients = explode(items, lemmatise_doc(descriptions))
+    item_ingredients.to_csv(item_ingredients_path, index=False)
+    print(f"{len(item_ingredients)} (item, raw ingredient) rows from {item_ingredients.item_id.nunique()} items "
+          f"-> {item_ingredients_path}")
 
-    edited = (table.ingredient != table.ingredient_raw).sum()
-    print(f"{len(table)} raw words ({edited} hand-edited) -> {path}")
+    ingredients = update_ingredients(item_ingredients, ingredients_path)
+    ingredients.to_csv(ingredients_path, index=False)
+    reviewed = (ingredients.is_ingredient != "").sum()
+    print(f"{len(ingredients)} raw ingredients ({reviewed} reviewed) -> {ingredients_path}")
 
 
 if __name__ == "__main__":
