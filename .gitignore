@@ -196,3 +196,5 @@ pyrightconfig.json
 data/*
 
 docs/*
+
+CLAUDE.md
