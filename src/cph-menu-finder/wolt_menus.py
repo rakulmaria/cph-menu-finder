@@ -95,6 +95,11 @@ def fetch_venues(client: httpx.Client, box: tuple, points_dir) -> pd.DataFrame:
             for item in section.get("items", []):
                 v = item.get("venue")
                 if v:
+                    # the main cuisine is in the item's filters, not in the venue itself
+                    filters = {f["id"]: f["values"] for f in item.get("filtering", {}).get("filters", [])}
+                    primary = filters.get("primary") or [None]
+                    rating = v.get("rating") or {}   # missing when a venue has too few ratings
+
                     venues[v["id"]] = {
                         "wolt_id": v["id"],
                         "name": v["name"],
@@ -102,6 +107,12 @@ def fetch_venues(client: httpx.Client, box: tuple, points_dir) -> pd.DataFrame:
                         "address": v.get("address", ""),
                         "lat": v["location"][1],
                         "lon": v["location"][0],
+                        "cuisine": primary[0],
+                        "tags": "|".join(v.get("tags", [])),
+                        "price_range": v.get("price_range"),
+                        "rating": rating.get("score"),
+                        "rating_volume": rating.get("volume"),
+                        "short_description": v.get("short_description", ""),
                     }
     venues = pd.DataFrame(venues.values())
     lat_min, lat_max, lon_min, lon_max = box
