@@ -5,7 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "da-core-news-trf",
+    "adjusttext>=1.4.0",
+    "da-core-news-trf @ https://github.com/explosion/spacy-models/releases/download/da_core_news_trf-3.8.0/da_core_news_trf-3.8.0-py3-none-any.whl",
     "dframcy>=0.1.6",
     "googletrans>=4.0.2",
     "httpx>=0.28.1",
@@ -30,6 +31,3 @@ dependencies = [
     "tqdm>=4.70.1",
     "wheel>=0.48.0",
 ]
-
-[tool.uv.sources]
-da-core-news-trf = { url = "https://github.com/explosion/spacy-models/releases/download/da_core_news_trf-3.8.0/da_core_news_trf-3.8.0-py3-none-any.whl" }
