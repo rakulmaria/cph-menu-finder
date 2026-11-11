@@ -5,9 +5,9 @@ import networkx as nx
 from collections import defaultdict
 from scipy.stats import binom
 
-def read(filename, column_of_interest, triangular_input = False, consider_self_loops = True, undirected = False, drop_zeroes = True, sep = "\t"):
+def read(filename, column_of_interest, triangular_input = False, consider_self_loops = True, undirected = False, drop_zeroes = True, sep = ","):
    """Reads a field separated input file into the internal backboning format (a Pandas Dataframe).
-   The input file should have three or more columns (default separator: tab).
+   The input file should have three or more columns (default separator: ,).
    The input file must have a one line header with the column names.
    There must be two columns called 'src' and 'trg', indicating the origin and destination of the interaction.
    All other columns must contain integer or floats, indicating the edge weight.
@@ -22,7 +22,7 @@ def read(filename, column_of_interest, triangular_input = False, consider_self_l
    consider_self_loops (bool): Do you want to consider self loops when calculating the backbone? default: True
    undirected (bool): Is the network undirected? default: False
    drop_zeroes (bool): Do you want to keep zero weighted connections in the network? Important: it affects methods based on degree, like disparity_filter. default: False
-   sep (char): The field separator of the inout file. default: tab
+   sep (char): The field separator of the inout file. default: ,
 
    Returns:
    The parsed network data, the number of nodes in the network and the number of edges.
@@ -68,7 +68,7 @@ def thresholding(table, threshold):
 
 def write(table, network, method, folder):
    if not table.empty and "src" in table:
-      table.to_csv("%s/%s_%s.csv" % (folder, network, method), sep = "\t", index = False)
+      table.to_csv("%s/%s_%s.csv" % (folder, network, method), sep = ",", index = False)
    else:
       warnings.warn("Incorrect/empty output. Nothing written on disk", RuntimeWarning)
 
