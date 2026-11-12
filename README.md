@@ -35,7 +35,7 @@ Google Maps raw places                         Wolt API
    │ prepare_data.py   (filter + format)          │ wolt_menus.py        (venues → menus → items.csv)
    ▼                                              ▼
 LLM input JSON                                 items.csv
-   │ llm_gateway_client.py (batched, web search)  │ raw_to_ingredient.py (spaCy da_core_news_trf lemmas)
+   │ llm_gateway_client.py (batched, web search)  │ build_wolt_data_model.py (spaCy da_core_news_trf lemmas)
    ▼                                              ▼
 responses/<model>.csv                          item_ingredients.csv + ingredients.csv
    │ annotate_menulinks.py (manual verification)  │ annotate_ingredients.py (manual verification)
