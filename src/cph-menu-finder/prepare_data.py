@@ -70,9 +70,6 @@ def prepare_sample(file, fraction=0.1, seed=42):
     file and reduce them to the fields llm_menu_finder.py expects (id, name,
     formattedAddress, websiteUri).
 
-    Author: @Claude Code
-    Reviewed: @Rakul M. H. Tórgarð
-
     Writes the sample to RAW_DATA_DIR / copenhagen-<pct>pct-sample-input-<today>.json,
     ready to point RESTAURANT_FILE at directly in llm_menu_finder.py
     """
