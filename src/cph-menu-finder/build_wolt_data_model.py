@@ -38,8 +38,8 @@ Many raw ingredients can share one verified ingredient (kyling, kyllingebryst ->
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
-    python raw_to_ingredient.py
-    python raw_to_ingredient.py --area copenhagen
+    python build_wolt_data_model.py
+    python build_wolt_data_model.py --area copenhagen
 """
 
 import argparse

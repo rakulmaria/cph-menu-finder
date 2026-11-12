@@ -19,7 +19,7 @@ Progress is saved to disk after every single annotation, so you can quit any tim
 'q') and re-run the script later to pick up exactly where you left off. 'u' undoes the last
 annotation of this session.
 
-ingredients.csv and item_ingredients.csv are made by raw_to_ingredient.py, which never
+ingredients.csv and item_ingredients.csv are made by build_wolt_data_model.py, which never
 overwrites what is annotated here, so the two can be run in any order.
 
 Author: @Claude Code
@@ -35,7 +35,7 @@ import re
 import sys
 
 import pandas as pd
-from raw_to_ingredient import ANNOTATED, INGREDIENT_COLUMNS, paths, read_ingredients
+from build_wolt_data_model import ANNOTATED, INGREDIENT_COLUMNS, paths, read_ingredients
 
 N_EXAMPLES = 3      # example descriptions shown per word
 EXAMPLE_WIDTH = 110
@@ -96,7 +96,7 @@ def main() -> None:
     args = parser.parse_args()
     item_ingredients_path, path = paths(args.area)
     if not path.exists() or not item_ingredients_path.exists():
-        sys.exit(f"{path} not found, run raw_to_ingredient.py --area {args.area} first")
+        sys.exit(f"{path} not found, run build_wolt_data_model.py --area {args.area} first")
 
     ingredients = read_ingredients(path)[INGREDIENT_COLUMNS]
     item_ingredients = pd.read_csv(item_ingredients_path, keep_default_na=False)
