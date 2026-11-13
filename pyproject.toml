@@ -10,6 +10,7 @@ dependencies = [
     "dframcy>=0.1.6",
     "googletrans>=4.0.2",
     "httpx>=0.28.1",
+    "igraph>=1.0.0",
     "ipykernel>=7.3.0",
     "kaleido>=1.4.0",
     "krippendorff>=0.8.2",
