@@ -23,27 +23,6 @@ def trim_urls(df):
     return df
 
 
-def is_restaurant_type(types):
-    """True for the Google place types that count as a "proper" restaurant type (used on primaryType)."""
-    types = pd.Series(types)
-
-    # possible "proper" restaurant types that aren't named restaurant or *_restaurant
-    other_types_to_keep = ["bagel_shop", "bistro", "diner", "pizza_delivery"]
-    # not considered "proper" restaurant
-    discard_restaurants = ["shawarma_restaurant", "hot_dog_restaurant"]
-
-    is_restaurant = types.str.fullmatch(r"(.+_)?restaurant", na=False) | types.isin(other_types_to_keep)
-    return is_restaurant & ~types.isin(discard_restaurants)
-
-
-def filter_dataframe(df):
-    # remove out of order restaurants
-    df = df[df["businessStatus"] == "OPERATIONAL"]
-
-    df = df[is_restaurant_type(df["primaryType"])]
-
-    return df
-
 def get_df(file_path, possible_filter=None):
     """
     Mainly used to get the LLM responses as one dataframe for analysis.
