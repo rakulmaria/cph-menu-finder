@@ -1,4 +1,4 @@
-"""Manual annotation tool for ingredients_verified.csv: go through the verified ingredients one at
+"""Manual annotation tool for categories.csv: go through the verified ingredients one at
 a time and give each one a category, following the Annotation Codebook for ingredient categories
 (cph-menu-finder.wiki/Annotation-Codebook-ingredients-categories.md).
 
@@ -23,7 +23,7 @@ Each ingredient gets exactly one category, chosen with a number key:
     kikærter     -> [17] bælgfrugter
     cola         -> [18] ikke-alkoholiske drikkevarer
 
-The decision is written to the column `category` of ingredients_verified.csv. The column is
+The decision is written to the column `category` of categories.csv. The column is
 added on the first run; an empty cell means not reviewed yet. Ingredients are shown in file
 order, and the script continues with the next unreviewed one when it is run again.
 
@@ -45,7 +45,7 @@ import sys
 import pandas as pd
 from config import WOLT_DATA_DIR
 
-FILE_NAME = "ingredients_verified.csv"
+FILE_NAME = "categories.csv"
 
 # The order of the codebook: the 14 categories of the paper first, then our own four. Danish, like the ingredients
 CATEGORIES = {
@@ -111,7 +111,7 @@ def prompt_category() -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Annotate ingredients_verified.csv: which category is each ingredient?")
+    parser = argparse.ArgumentParser(description="Annotate categories.csv: which category is each ingredient?")
     parser.add_argument("--area", default="copenhagen")
     args = parser.parse_args()
     path = WOLT_DATA_DIR / args.area / FILE_NAME
