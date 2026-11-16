@@ -115,6 +115,7 @@ def fetch_venues(client: httpx.Client, box: tuple, points_dir) -> pd.DataFrame:
                         "short_description": v.get("short_description", ""),
                     }
     venues = pd.DataFrame(venues.values())
+    # bounding box check
     lat_min, lat_max, lon_min, lon_max = box
     inside = venues["lat"].between(lat_min, lat_max) & venues["lon"].between(lon_min, lon_max)
     return venues[inside].sort_values("slug").reset_index(drop=True)
