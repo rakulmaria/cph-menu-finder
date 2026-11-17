@@ -13,6 +13,7 @@ import json
 import re
 import pandas as pd
 from config import *
+from prepare_data import *
 
 def trim_urls(df):
     url_prefix_pattern = re.compile(r'^(?:https?://)?(?:www\.)?', re.IGNORECASE)
