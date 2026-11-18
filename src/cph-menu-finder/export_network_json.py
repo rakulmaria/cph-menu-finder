@@ -26,7 +26,7 @@ Output:
     web/network.json         {"categories": {...colours}, "deltas": [min, max], "nodes": [...], "links": [...]}
     web/network_full.json    {"links": [[i, j, weight], ...]}, i and j index into "nodes" above
 
-@author: Rakul Tórgarð
+@author: Rakul Tórgarð & Claude Code
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
