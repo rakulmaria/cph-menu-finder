@@ -6,7 +6,9 @@
 <title>Ingredient network backbone</title>
 <!--
   Interactive version of plot_backbone in src/cph-menu-finder/network.ipynb.
-  Data: network.json, written by src/cph-menu-finder/export_network_json.py.
+  Data: network-item.json and network-venue.json (and the network_full-*.json files), written by
+  src/cph-menu-finder/export_network_json.py with --count item / --count venue. The "Count pairs per"
+  buttons switch between them by reloading the page with ?count=item or ?count=venue.
   Serve this folder and open it:  python3 -m http.server 8000
 -->
 <style>
@@ -51,9 +53,10 @@
   #full-toggle { justify-content: flex-start; gap: 6px; margin-top: 10px; cursor: pointer; }
   #full-toggle small { color: var(--muted); }
   #background { z-index: 0; position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }   /* full network, behind the svg */
-  #mode { margin-top: 10px; }
+  #mode, #count { margin-top: 10px; }
   #mode .options { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
-  #mode label { justify-content: flex-start; gap: 4px; align-items: baseline; cursor: pointer; }   /* overrides space-between from #controls label */
+  #count .options { display: flex; gap: 12px; margin-top: 2px; }
+  #mode label, #count label { justify-content: flex-start; gap: 4px; align-items: baseline; cursor: pointer; }   /* overrides space-between from #controls label */
   #legend .cat.off i { background: transparent !important; border: 1.5px solid var(--muted); }
   #legend .cat.off, #legend .cat.empty { opacity: 0.4; }
   #tooltip { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; pointer-events: none; opacity: 0; font-size: 12px; padding: 6px 8px; z-index: 5; }
@@ -70,7 +73,14 @@
 <div id="sidebar">
 <div id="controls" class="panel">
   <h1>Ingredient backbone</h1>
-  <label for="delta">Threshold δ <span><span id="delta-value"></span> <button id="reset" title="Back to δ = 32">reset</button></span></label>
+  <div id="count">
+    <div>Count pairs per</div>
+    <div class="options">
+      <label><input type="radio" name="count" value="venue"> venue</label>
+      <label><input type="radio" name="count" value="item"> item</label>
+    </div>
+  </div>
+  <label for="delta" style="margin-top: 10px">Threshold δ <span><span id="delta-value"></span> <button id="reset" title="Back to δ = 32">reset</button></span></label>
   <input id="delta" type="range" step="any" autocomplete="off">
   <div class="scale"><span>more pairs</span><span>fewer pairs</span></div>
   <div id="stats"></div>
@@ -107,6 +117,13 @@ const MAX_EDGE_WIDTH = 10;              // width of the most common pair
 const ALGORITHMS = { louvain: "Louvain", leiden: "Leiden" };   // as the radio buttons and the legend title name them
 // community colours, biggest community first. Communities beyond the palette share one grey
 const PALETTE = d3.schemeTableau10.concat(d3.schemeSet2);
+// which edge list to show: a pair counted once per venue (default) or once per item, from ?count= in the URL.
+// Venue counts leave out the copies that chains and copy-pasted menus add, see prepare_network.py
+const COUNT = new URLSearchParams(location.search).get("count") === "item" ? "item" : "venue";
+document.querySelectorAll("input[name=count]").forEach(r => {
+  r.checked = r.value === COUNT;   // the browser can restore an old choice on refresh; the URL is the truth
+  r.addEventListener("change", () => { location.search = "?count=" + r.value; });   // reload with the other data
+});
 
 const svg = d3.select("#chart");
 const tooltip = d3.select("#tooltip");
@@ -114,13 +131,13 @@ const slider = document.getElementById("delta");
 slider.min = Math.log10(MIN_DELTA); slider.max = Math.log10(MAX_DELTA);
 slider.value = Math.log10(DEFAULT_DELTA);
 
-d3.json("network.json").then(data => {
+d3.json(`network-${COUNT}.json`).then(data => {
   const nodes = data.nodes, links = data.links;   // links: z = the largest δ at which the pair is still kept
   const byId = new Map(nodes.map(n => [n.id, n]));
   const color = c => data.categories[c] || "#999";
   const maxNij = d3.max(links, l => l.nij);
   // node area = strength: the sum of nij over the ingredient's pairs in the backbone at the current δ,
-  // scaled so the strongest ingredient is MAX_NODE_SIZE wide. Edge width = items the pair appears in together
+  // scaled so the strongest ingredient is MAX_NODE_SIZE wide. Edge width = items (or venues, see COUNT) the pair appears in together
   let maxStrength = 1;
   const radius = n => (MAX_NODE_SIZE * Math.sqrt(n.strength / maxStrength) + 2) / 2;
   const width = l => MAX_EDGE_WIDTH * Math.sqrt(l.nij / maxNij) + 0.3;
@@ -259,7 +276,7 @@ d3.json("network.json").then(data => {
   function refreshFull() {
     if (fullBox.checked && !fullLinks && !loadingFull) {
       loadingFull = true;
-      d3.json("network_full.json").then(f => {
+      d3.json(`network_full-${COUNT}.json`).then(f => {
         fullLinks = f.links.map(([i, j]) => [nodes[i], nodes[j]]);
         document.getElementById("full-note").textContent = `(${fullLinks.length.toLocaleString()} pairs)`;
         refreshFull();
@@ -304,7 +321,7 @@ d3.json("network.json").then(data => {
     nodeSel.attr("opacity", d => near.has(d.id) ? 1 : 0.1);
     labelSel.attr("opacity", d => near.has(d.id) ? 1 : 0.1);
     linkSel.attr("stroke-opacity", l => (l.source === n || l.target === n) ? 0.7 : 0.03);
-    tooltip.html(`<b>${n.id}</b><br>${mode === "category" ? n.category : "community " + (group(n) + 1)}<br>strength ${n.strength.toLocaleString()} · ${n.n.toLocaleString()} items · ${near.size - 1} neighbours`).style("opacity", 1);
+    tooltip.html(`<b>${n.id}</b><br>${mode === "category" ? n.category : "community " + (group(n) + 1)}<br>strength ${n.strength.toLocaleString()} ${COUNT}s · ${n.n.toLocaleString()} items · ${near.size - 1} neighbours`).style("opacity", 1);
     moveTip(event);
   }
   function moveTip(e) { tooltip.style("left", e.clientX + 14 + "px").style("top", e.clientY + 14 + "px"); }
