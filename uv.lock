@@ -1926,6 +1926,7 @@ dependencies = [
     { name = "kaleido" },
     { name = "krippendorff" },
     { name = "nbformat" },
+    { name = "netwulf" },
     { name = "numpy" },
     { name = "openai" },
     { name = "openpyxl" },
@@ -1956,6 +1957,7 @@ requires-dist = [
     { name = "kaleido", specifier = ">=1.4.0" },
     { name = "krippendorff", specifier = ">=0.8.2" },
     { name = "nbformat", specifier = ">=5.11.1" },
+    { name = "netwulf", specifier = ">=0.1.5" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "openai", specifier = ">=3.15.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -2071,6 +2073,18 @@ sdist = { url = "https://files.pythonhosted.org/packages/dc/76/3af777226b63a5e64
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl", hash = "sha256:e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0", size = 2142205, upload-time = "2026-09-21T16:45:14.609Z" },
 ]
+
+[[package]]
+name = "netwulf"
+version = "0.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "simplejson" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/9f/95a4ce4071f44e9c73ed2c944f72393510bdaf79c5e417268a82c6187e36/netwulf-0.1.5.tar.gz", hash = "sha256:8a18a5afbd2fa430a1dc1d4bd07a9369009ebae121de1e58953dcd426aed05bb", size = 236034, upload-time = "2020-06-30T15:04:53.759Z" }
 
 [[package]]
 name = "nodeenv"
