@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingredient network backbone</title>
+<!--
+  Interactive version of plot_backbone in src/cph-menu-finder/network.ipynb.
+  Data: network.json, written by src/cph-menu-finder/export_network_json.py.
+  Serve this folder and open it:  python3 -m http.server 8000
+-->
+<style>
+  :root {
+    --bg: #fafaf8; --panel: rgba(255,255,255,0.92); --text: #222; --muted: #666; --border: #ddd;
+    --halo: #fafaf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181c; --panel: rgba(30,33,38,0.92); --text: #e8e8e8; --muted: #9aa; --border: #3a3f46; --halo: #16181c; }
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 14px/1.4 system-ui, -apple-system, sans-serif; overflow: hidden; }
+  /* stacking, back to front: full-network canvas, then the svg (backbone), then the sidebar. A positioned
+     element (the fixed canvas) paints above a static one, so the svg needs a position and z-index too */
+  svg { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; cursor: grab; }
+  svg:active { cursor: grabbing; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+           padding: 12px 14px; backdrop-filter: blur(4px); }
+  #sidebar { z-index: 2; position: fixed; top: 16px; left: 16px; width: 280px; display: flex;
+             flex-direction: column; gap: 12px; pointer-events: none; }
+  #sidebar .panel { pointer-events: auto; }
+  #controls h1 { font-size: 15px; margin: 0 0 10px; }
+  #controls label { display: flex; justify-content: space-between; align-items: baseline; }
+  #delta-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type=range] { width: 100%; margin: 6px 0 2px; }
+  .scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  #stats { margin-top: 10px; color: var(--muted); font-size: 13px; }
+  #stats b { color: var(--text); }
+  #legend { flex: none; font-size: 12px; }   /* every category on its own line, no inner scrolling */
+  #legend .head, #legend .cat { display: flex; align-items: center; gap: 6px; padding: 1px 0; }   /* not #cats itself, or the rows line up side by side */
+  #legend i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  button { font: inherit; font-size: 12px; color: var(--text); background: none; border: 1px solid var(--border);
+           border-radius: 4px; padding: 1px 8px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #legend .head { flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 6px; }
+  #legend .head span { display: flex; gap: 4px; }
+  #legend .cat { cursor: pointer; user-select: none; padding: 1px 0; white-space: nowrap; }
+  #legend .txt { overflow: hidden; text-overflow: ellipsis; }
+  #pins { margin-top: 10px; display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; }
+  circle.pinned { stroke: var(--text); stroke-width: 2px; }   /* a node the reader has placed by hand */
+  #full-toggle { justify-content: flex-start; gap: 6px; margin-top: 10px; cursor: pointer; }
+  #full-toggle small { color: var(--muted); }
+  #background { z-index: 0; position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }   /* full network, behind the svg */
+  #mode { margin-top: 10px; }
+  #mode .options { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+  #mode label { justify-content: flex-start; gap: 4px; align-items: baseline; cursor: pointer; }   /* overrides space-between from #controls label */
+  #legend .cat.off i { background: transparent !important; border: 1.5px solid var(--muted); }
+  #legend .cat.off, #legend .cat.empty { opacity: 0.4; }
+  #tooltip { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; pointer-events: none; opacity: 0; font-size: 12px; padding: 6px 8px; z-index: 5; }
+  .label { pointer-events: none; paint-order: stroke; stroke: var(--halo);
+           fill: var(--text); text-anchor: middle; }   /* font-size and stroke-width are set on the layer, see updateLabels */
+  .hint { z-index: 2; position: fixed; bottom: 12px; left: 16px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 640px) { #sidebar { width: auto; right: 16px; } #legend { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="background"></canvas>
+<svg id="chart"></svg>
+
+<div id="sidebar">
+<div id="controls" class="panel">
+  <h1>Ingredient backbone</h1>
+  <label for="delta">Threshold δ <span><span id="delta-value"></span> <button id="reset" title="Back to δ = 32">reset</button></span></label>
+  <input id="delta" type="range" step="any" autocomplete="off">
+  <div class="scale"><span>more pairs</span><span>fewer pairs</span></div>
+  <div id="stats"></div>
+  <div id="pins"><button id="unpin">unpin all</button><span>drag a node to pin it, double-click to unpin</span></div>
+  <label id="full-toggle"><input id="full" type="checkbox" autocomplete="off"> Show full network <small id="full-note"></small></label>
+  <div id="mode" autocomplete="off">
+    <div>Color by</div>
+    <div class="options">
+      <label><input type="radio" name="mode" value="louvain" checked> community (Louvain)</label>
+      <label><input type="radio" name="mode" value="leiden"> community (Leiden)</label>
+      <label><input type="radio" name="mode" value="category"> category</label>
+    </div>
+  </div>
+</div>
+<div id="legend" class="panel">
+  <div class="head"><b id="legend-title"></b>
+    <span><button id="all">all</button><button id="none">none</button></span></div>
+  <div id="cats"></div>
+</div>
+</div>
+<div id="tooltip" class="panel"></div>
+<div class="hint">scroll to zoom · drag background to pan · drag a node to pin it · double-click a node to unpin · hover to highlight</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script>
+const DEFAULT_DELTA = 32;
+const MIN_DELTA = 2, MAX_DELTA = 200;   // the slider is logarithmic, δ spans two orders of magnitude
+const N_LABELS = 50;                    // only the strongest ingredients are labelled at zoom 1 ...
+const LABEL_SIZE = 14;                  // ... and N_LABELS * zoom² of them when zoomed in. Label size in px at zoom 1
+const LABEL_HALO = 0.27;                // white outline width and the gap above the node, as a share of the label size
+const LABEL_ZOOM = 0.5;                 // on-screen label size grows as zoom^LABEL_ZOOM: 0 = fixed size, 1 = grows with the nodes
+const MAX_NODE_SIZE = 40;               // diameter of the most common ingredient
+const MAX_EDGE_WIDTH = 10;              // width of the most common pair
+const ALGORITHMS = { louvain: "Louvain", leiden: "Leiden" };   // as the radio buttons and the legend title name them
+// community colours, biggest community first. Communities beyond the palette share one grey
+const PALETTE = d3.schemeTableau10.concat(d3.schemeSet2);
+
+const svg = d3.select("#chart");
+const tooltip = d3.select("#tooltip");
+const slider = document.getElementById("delta");
+slider.min = Math.log10(MIN_DELTA); slider.max = Math.log10(MAX_DELTA);
+slider.value = Math.log10(DEFAULT_DELTA);
+
+d3.json("network.json").then(data => {
+  const nodes = data.nodes, links = data.links;   // links: z = the largest δ at which the pair is still kept
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const color = c => data.categories[c] || "#999";
+  const maxNij = d3.max(links, l => l.nij);
+  // node area = strength: the sum of nij over the ingredient's pairs in the backbone at the current δ,
+  // scaled so the strongest ingredient is MAX_NODE_SIZE wide. Edge width = items the pair appears in together
+  let maxStrength = 1;
+  const radius = n => (MAX_NODE_SIZE * Math.sqrt(n.strength / maxStrength) + 2) / 2;
+  const width = l => MAX_EDGE_WIDTH * Math.sqrt(l.nij / maxNij) + 0.3;
+
+  // resolve link ends once, so the same objects are reused every time the slider moves
+  links.forEach(l => { l.source = byId.get(l.source); l.target = byId.get(l.target); });
+
+  const zoomLayer = svg.append("g");
+  const linkLayer = zoomLayer.append("g").attr("stroke-linecap", "round");
+  const nodeLayer = zoomLayer.append("g");
+  const labelLayer = zoomLayer.append("g");
+  let zoomK = 1, labelGap = 0, zoomT = d3.zoomIdentity;
+  svg.call(d3.zoom().scaleExtent([0.2, 8]).on("zoom", e => {
+    zoomLayer.attr("transform", e.transform);
+    zoomT = e.transform;
+    zoomK = e.transform.k;
+    updateLabels();
+    drawFull();
+  })).on("dblclick.zoom", null);   // a double-click on a node unpins it, so it must not also zoom in. Removed from the svg, not the zoom
+
+  const sim = d3.forceSimulation()
+    .force("link", d3.forceLink().id(n => n.id).distance(60).strength(0.15))
+    .force("charge", d3.forceManyBody().strength(-120))
+    .force("collide", d3.forceCollide(n => radius(n) + 1.5))
+    .force("x", d3.forceX().strength(0.04))
+    .force("y", d3.forceY().strength(0.04));
+
+  // what the nodes are coloured by. The legend lists those groups, and clicking one hides or shows it.
+  // Each mode remembers its own hidden groups (community numbers mean something different at each δ)
+  // mode is "category" or the name of a community detection algorithm (louvain, leiden), see ALGORITHMS
+  let mode = "louvain", curDelta = DEFAULT_DELTA;
+  const hidden = { category: new Set(), louvain: new Set(), leiden: new Set() };
+  // n.communities[algorithm] = the community per whole-number δ, from MIN_DELTA
+  const group = n => mode === "category" ? n.category : n.communities[mode][curDelta - MIN_DELTA];
+  const groupColor = g => mode === "category" ? color(g) : (PALETTE[g] || "#999");
+  const visible = n => !hidden[mode].has(group(n));
+  let linkSel, nodeSel, labelSel, activeLinks = [], shown = [], legendKeys = [];
+  // nodes the reader has dragged. They keep their place when δ or the filters change, but are not saved:
+  // a reload starts from the computed layout again
+  const pinned = new Set();
+
+  function update(delta) {
+    curDelta = delta;
+    const backbone = links.filter(l => l.z > delta);   // same rule as backboning.thresholding
+    // the legend counts the whole backbone, so a deselected category still shows how many it would add back
+    legend(backbone);
+    // strength comes from the whole backbone, not only the drawn pairs, so hiding a group does not resize the rest
+    nodes.forEach(n => { n.strength = 0; });
+    backbone.forEach(l => { l.source.strength += l.nij; l.target.strength += l.nij; });
+    maxStrength = d3.max(nodes, n => n.strength);
+    // a pair is drawn only when both of its ingredients are in a group that is not hidden
+    activeLinks = backbone.filter(l => visible(l.source) && visible(l.target));
+    const ids = new Set(activeLinks.flatMap(l => [l.source.id, l.target.id]));
+    const activeNodes = nodes.filter(n => ids.has(n.id));
+    shown = activeNodes;
+    refreshFull();
+
+    // a node that appears for the first time starts next to a neighbour that is already placed
+    activeNodes.forEach(n => {
+      if (n.x !== undefined) return;
+      const nb = activeLinks.find(l => (l.source === n && l.target.x !== undefined) || (l.target === n && l.source.x !== undefined));
+      const o = nb ? (nb.source === n ? nb.target : nb.source) : { x: 0, y: 0 };
+      n.x = o.x + (Math.random() - 0.5) * 20; n.y = o.y + (Math.random() - 0.5) * 20;
+    });
+
+    linkSel = linkLayer.selectAll("line").data(activeLinks, l => l.source.id + "|" + l.target.id)
+      .join("line").attr("stroke", l => groupColor(group(l.source))).attr("stroke-opacity", 0.3)
+      .attr("stroke-width", width);
+    nodeSel = nodeLayer.selectAll("circle").data(activeNodes, n => n.id)
+      .join("circle").attr("r", radius).attr("fill", n => groupColor(group(n)))
+      .attr("stroke", "var(--bg)").attr("stroke-width", 0.8)
+      .on("mouseover", (e, n) => highlight(n, e)).on("mousemove", moveTip).on("mouseout", () => highlight(null))
+      .on("dblclick", (e, n) => unpin(n))
+      // a node that is dragged stays where it is dropped (fx, fy stay set). A click without a move leaves it as it was
+      .call(d3.drag().on("start", e => {
+                       if (!e.active) sim.alphaTarget(0.2).restart();
+                       e.subject.wasPinned = pinned.has(e.subject); e.subject.moved = false;
+                       e.subject.fx = e.subject.x; e.subject.fy = e.subject.y;
+                     })
+                     .on("drag", e => { e.subject.moved = true; e.subject.fx = e.x; e.subject.fy = e.y; })
+                     .on("end", e => {
+                       if (!e.active) sim.alphaTarget(0);
+                       if (e.subject.moved) pinned.add(e.subject);
+                       else if (!e.subject.wasPinned) { e.subject.fx = null; e.subject.fy = null; }
+                       refreshPins();
+                     }));
+    refreshPins();
+    updateLabels();
+
+    sim.nodes(activeNodes);
+    sim.force("link").links(activeLinks);
+    sim.alpha(0.6).restart();
+
+    reset.disabled = delta === DEFAULT_DELTA;
+    document.getElementById("delta-value").textContent = delta;
+    document.getElementById("stats").innerHTML =
+      `<b>${activeNodes.length}</b> ingredients · <b>${activeLinks.length.toLocaleString()}</b> pairs`;
+  }
+
+  function refreshPins() {
+    nodeSel.classed("pinned", n => pinned.has(n));
+    const button = document.getElementById("unpin");
+    button.disabled = pinned.size === 0;
+    button.textContent = pinned.size ? `unpin all (${pinned.size})` : "unpin all";
+  }
+  function unpin(n) {
+    if (!pinned.delete(n)) return;
+    n.fx = null; n.fy = null;
+    refreshPins();
+    sim.alpha(0.3).restart();   // let the layout settle around the freed node
+  }
+
+  // the strongest ingredients are labelled; zooming in labels more of them, N_LABELS * zoom² (all of them
+  // from about zoom 3). The text grows with the zoom, but slower than the nodes (LABEL_ZOOM), so the many
+  // labels at high zoom do not cover each other
+  function updateLabels() {
+    const count = Math.round(N_LABELS * zoomK * zoomK);
+    // the layer is scaled by zoomK already, so divide out the part of the growth that should not show
+    const f = Math.pow(zoomK, LABEL_ZOOM - 1);
+    const font = LABEL_SIZE * f;
+    labelGap = LABEL_HALO * font;   // everything about a label follows its size
+    labelLayer.style("font-size", font + "px").style("stroke-width", labelGap + "px");
+    labelSel = labelLayer.selectAll("text")
+      .data(d3.sort(shown, n => -n.strength).slice(0, count), n => n.id)
+      .join("text").attr("class", "label").text(n => n.id)
+      .attr("x", n => n.x).attr("y", n => n.y - radius(n) - labelGap);   // the simulation may be at rest, so place them now
+  }
+
+  // --- the full network, drawn faintly on a canvas behind the svg. It is not part of the simulation: the
+  // layout comes from the backbone, and a pair is drawn when both of its ingredients are on screen
+  // (so it follows the δ and the hidden groups). 22k pairs would be slow as svg lines on every tick
+  const canvas = document.getElementById("background"), ctx = canvas.getContext("2d");
+  const fullBox = document.getElementById("full");
+  let fullLinks = null, fullShown = [], loadingFull = false;   // fullLinks: [source node, target node] once loaded
+
+  function refreshFull() {
+    if (fullBox.checked && !fullLinks && !loadingFull) {
+      loadingFull = true;
+      d3.json("network_full.json").then(f => {
+        fullLinks = f.links.map(([i, j]) => [nodes[i], nodes[j]]);
+        document.getElementById("full-note").textContent = `(${fullLinks.length.toLocaleString()} pairs)`;
+        refreshFull();
+      });
+    }
+    const on = new Set(shown);
+    fullShown = fullBox.checked && fullLinks ? fullLinks.filter(([a, b]) => on.has(a) && on.has(b)) : [];
+    drawFull();
+  }
+
+  function drawFull() {
+    const dpr = devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!fullShown.length) return;
+    // same view as the svg: the origin is the middle of the screen, then the zoom
+    ctx.setTransform(dpr * zoomT.k, 0, 0, dpr * zoomT.k, dpr * (zoomT.x + innerWidth / 2), dpr * (zoomT.y + innerHeight / 2));
+    ctx.beginPath();
+    for (const [a, b] of fullShown) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    ctx.strokeStyle = getComputedStyle(document.body).color;   // follows the light / dark theme
+    ctx.globalAlpha = 0.07;
+    ctx.lineWidth = 0.7 / zoomT.k;   // a hairline on screen at every zoom
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  sim.on("tick", () => {
+    drawFull();
+    linkSel.attr("x1", l => l.source.x).attr("y1", l => l.source.y).attr("x2", l => l.target.x).attr("y2", l => l.target.y);
+    nodeSel.attr("cx", n => n.x).attr("cy", n => n.y);
+    labelSel.attr("x", n => n.x).attr("y", n => n.y - radius(n) - labelGap);
+  });
+
+  function highlight(n, event) {
+    if (!n) {
+      tooltip.style("opacity", 0);
+      nodeSel.attr("opacity", 1); linkSel.attr("stroke-opacity", 0.3); labelSel.attr("opacity", 1);
+      return;
+    }
+    const near = new Set([n.id]);
+    activeLinks.forEach(l => { if (l.source === n) near.add(l.target.id); if (l.target === n) near.add(l.source.id); });
+    nodeSel.attr("opacity", d => near.has(d.id) ? 1 : 0.1);
+    labelSel.attr("opacity", d => near.has(d.id) ? 1 : 0.1);
+    linkSel.attr("stroke-opacity", l => (l.source === n || l.target === n) ? 0.7 : 0.03);
+    tooltip.html(`<b>${n.id}</b><br>${mode === "category" ? n.category : "community " + (group(n) + 1)}<br>strength ${n.strength.toLocaleString()} · ${n.n.toLocaleString()} items · ${near.size - 1} neighbours`).style("opacity", 1);
+    moveTip(event);
+  }
+  function moveTip(e) { tooltip.style("left", e.clientX + 14 + "px").style("top", e.clientY + 14 + "px"); }
+
+  function legend(backbone) {
+    const members = new Map();   // group -> ingredients of the whole backbone, so hidden groups keep their count
+    backbone.forEach(l => [l.source, l.target].forEach(n => {
+      const g = group(n);
+      if (g < 0 && mode !== "category") return;   // not in this δ's backbone (can only happen on a rounding tie)
+      if (!members.has(g)) members.set(g, new Set());
+      members.get(g).add(n);
+    }));
+    // categories: always all of them, so a hidden one can be brought back. Communities: the ones at this δ
+    const keys = mode === "category" ? Object.keys(data.categories) : d3.sort(members.keys());
+    const label = g => {
+      const size = members.has(g) ? members.get(g).size : 0;
+      if (mode === "category") return `${g} (${size})`;
+      const top = d3.sort(members.get(g), n => -n.n).slice(0, 3).map(n => n.id).join(", ");   // the most common ingredients name the community
+      return `${g + 1}: ${top} (${size})`;
+    };
+    d3.select("#legend-title").text(mode === "category" ? "Category (ingredients)" : `Community, ${ALGORITHMS[mode]} (ingredients)`);
+    d3.select("#cats").selectAll("div").data(keys, g => g)
+      .join("div")
+      .attr("class", g => "cat" + (hidden[mode].has(g) ? " off" : "") + (members.has(g) ? "" : " empty"))
+      .attr("title", g => label(g))
+      .html(g => `<i style="background:${groupColor(g)}"></i><span class="txt">${label(g)}</span>`)
+      .on("click", (e, g) => { hidden[mode].has(g) ? hidden[mode].delete(g) : hidden[mode].add(g); update(curDelta); });
+    legendKeys = keys;
+  }
+
+  // centre the view on the middle of the screen
+  const resize = () => {
+    svg.attr("viewBox", [-innerWidth / 2, -innerHeight / 2, innerWidth, innerHeight]);
+    const dpr = devicePixelRatio || 1;   // a sharp canvas on high-density screens
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    drawFull();
+  };
+  resize(); addEventListener("resize", resize);
+
+  // the slider is logarithmic, so its raw value is never exactly 32. δ is rounded to a whole number: the
+  // communities in network.json are computed for each whole δ, and what is shown is what is filtered on
+  const read = () => Math.round(Math.pow(10, +slider.value));
+  const reset = document.getElementById("reset");
+  const setDelta = d => { slider.value = Math.log10(d); update(read()); };
+  reset.addEventListener("click", () => setDelta(DEFAULT_DELTA));
+  document.getElementById("all").addEventListener("click", () => { hidden[mode].clear(); update(curDelta); });
+  document.getElementById("none").addEventListener("click", () => { legendKeys.forEach(g => hidden[mode].add(g)); update(curDelta); });
+  document.getElementById("unpin").addEventListener("click", () => { [...pinned].forEach(unpin); });
+  fullBox.checked = false;   // off at load, whatever the browser restored
+  fullBox.addEventListener("change", refreshFull);
+  document.querySelectorAll("input[name=mode]").forEach(r => {
+    r.checked = r.value === mode;   // the browser can restore the radio choice from before a refresh; mode is the truth
+    r.addEventListener("change", () => { mode = r.value; update(curDelta); });
+  });
+  slider.addEventListener("input", () => update(read()));
+  update(read());
+});
+</script>
+</body>
+</html>
