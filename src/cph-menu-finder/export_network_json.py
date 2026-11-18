@@ -1,14 +1,21 @@
 """Export the Noise-Corrected ingredient network as a JSON file for the interactive D3 plot
-in web/network.html.
+in d3_interactive_plots/network.html.
 
 The notebook writes one backbone per δ. The page lets the reader pick any δ with a slider, so
 instead of one file per δ this script writes every pair once, with its z-score
 (z = score / sdev_cij). backboning.thresholding keeps a pair when z > δ, so the page can do the
 same filtering in the browser.
 
+Options:
+    --count item    (default) use the edge list where a pair is counted once per item
+    --count venue   use the edge list where a pair is counted once per venue
+                    (prepare_network.py --count venue)
+The newest edge list of that kind in data/network/ is used. The page switches between the two
+exports with its "Count pairs per" buttons.
+
 Steps:
     1. Build the verified (item, ingredient) table, as in prepare_network.py.
-    2. Run the NC backboning on edges.csv and compute z for every pair.
+    2. Run the NC backboning on the edge list and compute z for every pair.
     3. Keep the pairs with z > MIN_DELTA (the loosest δ the slider can show).
     4. For every whole-number δ on the slider, build the backbone as a networkx graph and detect
        communities with Louvain and with Leiden (both maximise modularity, and are weighted by the
@@ -22,20 +29,24 @@ Steps:
        [node index, node index, weight]. The page loads it only when "show full network" is switched
        on, and draws it faintly behind the backbone.
 
-Output:
-    web/network.json         {"categories": {...colours}, "deltas": [min, max], "nodes": [...], "links": [...]}
-    web/network_full.json    {"links": [[i, j, weight], ...]}, i and j index into "nodes" above
+Output (in d3_interactive_plots/, <count> is item or venue):
+    network-<count>.json         {"count": ..., "edges_file": ..., "categories": {...colours},
+                                  "deltas": [min, max], "nodes": [...], "links": [...]}
+    network_full-<count>.json    {"links": [[i, j, weight], ...]}, i and j index into "nodes" above
 
 @author: Rakul Tórgarð & Claude Code
 @review: Rakul Tórgarð
 
 Run from the terminal (inside src/cph-menu-finder):
     uv run python export_network_json.py
+    uv run python export_network_json.py --count venue
 Then serve the folder and open the page:
-    cd ../../web && python3 -m http.server 8000
+    cd ../../d3_interactive_plots && python3 -m http.server 8000
 """
 
+import argparse
 import json
+import sys
 
 import backboning
 import networkx as nx
@@ -54,8 +65,18 @@ ALGORITHMS = {
     "louvain": lambda g: nx.community.louvain_communities(g, weight="score", seed=SEED),
     "leiden": lambda g: nx.community.leiden_communities(g, weight="score", metric="modularity", seed=SEED),
 }
-OUTPUT = ROOT_DIR / "d3_interactive_plots" / "network.json"
-OUTPUT_FULL = ROOT_DIR / "d3_interactive_plots" / "network_full.json"
+OUTPUT_DIR = ROOT_DIR / "d3_interactive_plots"
+# the edge lists prepare_network.py writes, per --count. The date in the name sorts, so the last match is the newest
+EDGE_PATTERNS = {"item": "edges-????-??-??.csv", "venue": "edges-????-??-??-venue.csv"}
+
+
+def newest_edges(count):
+    """The newest edge list of prepare_network.py for this count."""
+    found = sorted(NETWORK_DATA_DIR.glob(EDGE_PATTERNS[count]))
+    if not found:
+        flag = "" if count == "item" else f" --count {count}"
+        sys.exit(f"no {EDGE_PATTERNS[count]} in {NETWORK_DATA_DIR}, run prepare_network.py{flag} first")
+    return found[-1]
 
 
 def communities_per_delta(pairs, names, detect):
@@ -75,11 +96,20 @@ def communities_per_delta(pairs, names, detect):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Export the NC ingredient network for the D3 page.")
+    parser.add_argument("--count", choices=list(EDGE_PATTERNS), default="item",
+                        help="the edge list to use: pairs counted once per item (default) or once per venue")
+    args = parser.parse_args()
+    edges_file = newest_edges(args.count)
+    output = OUTPUT_DIR / f"network-{args.count}.json"
+    output_full = OUTPUT_DIR / f"network_full-{args.count}.json"
+    print(f"using {edges_file.name}")
+
     dishes_ingredients = read_data()
     n_items = dishes_ingredients.ingredient.value_counts()
     categories = pd.read_csv(WOLT_DATA_DIR / "copenhagen" / "categories.csv").set_index("ingredient_verified").category
 
-    table, _, _ = backboning.read(NETWORK_DATA_DIR / "edges.csv", column_of_interest="weight",
+    table, _, _ = backboning.read(edges_file, column_of_interest="weight",
                                   triangular_input=True, consider_self_loops=False, undirected=True, sep=",")
     nc_table = backboning.noise_corrected(table, undirected=True)
 
@@ -100,16 +130,17 @@ def main():
     colors = {name: "#%02x%02x%02x" % tuple(int(255 * c) for c in rgb)
               for name, rgb in zip(CATEGORIES.values(), plt.cm.tab20.colors)}
 
-    OUTPUT.parent.mkdir(exist_ok=True)
-    OUTPUT.write_text(json.dumps({"categories": colors, "deltas": [2, MAX_DELTA], "nodes": nodes, "links": links}, ensure_ascii=False))
-    # the full network: every pair of edges.csv. Pairs with an ingredient that is not in "nodes" cannot be
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    output.write_text(json.dumps({"count": args.count, "edges_file": edges_file.name, "categories": colors,
+                                  "deltas": [2, MAX_DELTA], "nodes": nodes, "links": links}, ensure_ascii=False))
+    # the full network: every pair of the edge list. Pairs with an ingredient that is not in "nodes" cannot be
     # placed, so they are left out (none at the moment: all ingredients are in the backbone at the loosest δ)
     index = {n: i for i, n in enumerate(names)}
-    full = pd.read_csv(NETWORK_DATA_DIR / "edges.csv")
+    full = pd.read_csv(edges_file)
     full = full[full.src.isin(index) & full.trg.isin(index)]
-    OUTPUT_FULL.write_text(json.dumps({"links": [[index[r.src], index[r.trg], int(r.weight)] for r in full.itertuples()]}))
-    print(f"wrote {len(full)} pairs of the full network to {OUTPUT_FULL}")
-    print(f"wrote {len(nodes)} nodes and {len(links)} links to {OUTPUT}")
+    output_full.write_text(json.dumps({"links": [[index[r.src], index[r.trg], int(r.weight)] for r in full.itertuples()]}))
+    print(f"wrote {len(full)} pairs of the full network to {output_full}")
+    print(f"wrote {len(nodes)} nodes and {len(links)} links to {output}")
 
 
 if __name__ == "__main__":
